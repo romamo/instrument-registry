@@ -304,7 +304,9 @@ def resolve_security(
     # 2. Programmatic FX Resolution
     if criteria.symbol:
         # Check if it looks like a currency pair
-        fx_res = resolve_currency(str(criteria.symbol), verify=verify)
+        fx_res = resolve_currency(
+            str(criteria.symbol), target_currency=criteria.currency, verify=verify
+        )
         if fx_res:
             return fx_res
 
@@ -402,7 +404,7 @@ def resolve_and_persist(
                 else:
                     final_target_path = Path(platformdirs.user_data_dir("commodity-registry"))
 
-            add_commodity(
+            new_commodity = add_commodity(
                 criteria=criteria,
                 metadata=res,
                 target_path=final_target_path,
@@ -410,6 +412,8 @@ def resolve_and_persist(
                 asset_class=asset_class,
                 dry_run=dry_run,
             )
+            res.name = new_commodity.name
+
             if not dry_run:
                 # Refresh registry to include new item
                 registry.load_path(final_target_path)

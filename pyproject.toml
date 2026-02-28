@@ -1,6 +1,6 @@
 [project]
 name = "commodity-registry"
-version = "0.1.9"
+version = "0.1.10"
 description = "Single source of truth for financial instrument data"
 authors = [
     { name = "Roman Medvedev", email = "pypi@romavm.dev" }
