@@ -208,7 +208,12 @@ def add_commodity(
             # Should not happen given check in step 1, but for mypy
             raise ValueError("Could not determine ticker for name generation")
 
-        base_ticker = token.split(":")[0].split(".")[0]
+        # For CASH instruments, prefer use the name (e.g. "EUR") if it is a 3-letter code.
+        is_fx = instrument_type == InstrumentType.CASH or asset_class == AssetClass.CASH
+        if is_fx and metadata and metadata.name and len(str(metadata.name)) == 3:
+            base_ticker = str(metadata.name)
+        else:
+            base_ticker = token.split(":")[0].split(".")[0]
 
         # Sanitize name for Beancount (uppercase, alphanumeric + ._-)
         clean_name = re.sub(r"[^A-Z0-9\._-]", ".", base_ticker.upper())

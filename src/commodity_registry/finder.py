@@ -243,11 +243,15 @@ def resolve_currency(
         if not fetch_metadata(ticker, provider=ProviderName.YAHOO):
             return None
 
+    from .models import AssetClass, InstrumentType
+
     return SearchResult(
         provider=ProviderName.YAHOO,
         ticker=Ticker(root=ticker),
         name=base,
         currency=CurrencyCode(Currency(quote_str)),
+        asset_class=AssetClass.CASH,
+        instrument_type=InstrumentType.CASH,
     )
 
 
@@ -380,13 +384,14 @@ def resolve_and_persist(
             elif "CRYPTOCURRENCY" in raw_type:
                 inst_type = InstrumentType.CRYPTO
                 asset_class = AssetClass.CRYPTO
-            elif "CURRENCY" in raw_type:
+            elif "CURRENCY" in raw_type or "CASH" in raw_type:
                 inst_type = InstrumentType.CASH
                 asset_class = AssetClass.CASH
 
             # Do not persist CASH/CURRENCY to file
             if inst_type == InstrumentType.CASH or asset_class == AssetClass.CASH:
                 logger.debug(f"Skipping persistence for {res.name} as it is CASH/CURRENCY.")
+                # Skip persistence for FX/Cash instruments.
                 return res
 
             # Determine target path
