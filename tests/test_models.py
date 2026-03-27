@@ -109,3 +109,27 @@ def test_enums():
 
     with pytest.raises(ValueError):
         InstrumentType("InvalidType")
+
+
+def test_commodity_name_relaxed():
+    # Test symbols that were previously invalid under Beancount rules
+    valid_names = ["^GSPC", "EURUSD=X", "BTC-USD", "4GLD.DE", "ETH:USD", "123"]
+    for name in valid_names:
+        c = Commodity(
+            name=name,
+            asset_class=AssetClass.STOCK,
+            instrument_type=InstrumentType.STOCK,
+            currency="USD",
+        )
+        assert c.name == name
+
+    # Test invalid names (containing whitespace)
+    invalid_names = ["AAPL ", " AAPL", "AAPL Ticker"]
+    for name in invalid_names:
+        with pytest.raises(ValidationError):
+            Commodity(
+                name=name,
+                asset_class=AssetClass.STOCK,
+                instrument_type=InstrumentType.STOCK,
+                currency="USD",
+            )

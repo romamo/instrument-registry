@@ -70,9 +70,7 @@ class ValidationPoint(BaseModel):
 
 
 class Commodity(BaseModel):
-    name: str = Field(
-        ..., description="Canonical Beancount commodity name", pattern=r"^[A-Z][A-Z0-9\._-]*$"
-    )
+    name: str = Field(..., description="Canonical financial symbol", pattern=r"^\S+$")
     isin: ISIN.Input | None = None
     figi: str | None = Field(None, description="Composite FIGI identifier")
 

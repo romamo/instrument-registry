@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-27
+
+### Added
+- **Relaxed Commodity Constraints**: Decoupled the registry from strict Beancount naming requirements. Any valid financial symbol (including `^GSPC`, `EURUSD=X`) can now be used as a commodity name without automatic sanitization, increasing flexibility for non-Beancount use cases.
+
 ## [0.1.12] - 2026-03-27
 
 ### Changed

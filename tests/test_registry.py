@@ -156,3 +156,35 @@ def test_duplicate_yaml_key(temp_registry_dir):
 
     with pytest.raises(yaml.constructor.ConstructorError, match="Duplicate key found"):
         CommodityRegistry(extra_paths=[dup_file], include_bundled=False)
+
+
+def test_add_commodity_no_sanitization(tmp_path):
+    from pydantic_market_data.models import SecurityCriteria
+
+    from commodity_registry.models import AssetClass, InstrumentType
+    from commodity_registry.registry import add_commodity
+
+    target_path = tmp_path / "manual.yaml"
+    criteria = SecurityCriteria(symbol="^GSPC", currency="USD")
+
+    # Should NOT add X. prefix or convert to dots
+    c = add_commodity(
+        criteria=criteria,
+        metadata=None,
+        target_path=target_path,
+        instrument_type=InstrumentType.INDEX,
+        asset_class=AssetClass.STOCK,
+    )
+
+    assert c.name == "^GSPC"
+
+    # Test with provider prefix - should extract only ticker part
+    criteria_2 = SecurityCriteria(symbol="YAHOO:EURUSD=X", currency="USD")
+    c2 = add_commodity(
+        criteria=criteria_2,
+        metadata=None,
+        target_path=target_path,
+        instrument_type=InstrumentType.CASH,
+        asset_class=AssetClass.CASH,
+    )
+    assert c2.name == "EURUSD=X"

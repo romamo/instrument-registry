@@ -189,8 +189,6 @@ def add_commodity(
     Extracts base ticker (before ':') for Beancount name.
     Stores provider-specific tickers only if found online.
     """
-    import re
-
     # 1. Determine ticker
     if not criteria.symbol and not name:
         if not metadata or not metadata.ticker:
@@ -200,7 +198,7 @@ def add_commodity(
     # 2. Extract base ticker for Beancount name
     # Example: "ALUM.L" -> "ALUM", "4GLD:GER:EUR" -> "4GLD"
     if name:
-        clean_name = name.upper()
+        clean_name = name
     else:
         # Prefer online metadata ticker if available, otherwise fallback to criteria.symbol
         token = str(metadata.ticker) if metadata and metadata.ticker else str(criteria.symbol or "")
@@ -211,17 +209,11 @@ def add_commodity(
         # For CASH instruments, prefer use the name (e.g. "EUR") if it is a 3-letter code.
         is_fx = instrument_type == InstrumentType.CASH or asset_class == AssetClass.CASH
         if is_fx and metadata and metadata.name and len(str(metadata.name)) == 3:
-            base_ticker = str(metadata.name)
+            clean_name = str(metadata.name)
         else:
-            base_ticker = token.split(":")[0].split(".")[0]
-
-        # Sanitize name for Beancount (uppercase, alphanumeric + ._-)
-        clean_name = re.sub(r"[^A-Z0-9\._-]", ".", base_ticker.upper())
-        clean_name = re.sub(r"\.+", ".", clean_name).strip(".")
-
-        # Ensure it starts with A-Z (Beancount requirement)
-        if not re.match(r"^[A-Z]", clean_name):
-            clean_name = "X." + clean_name
+            # Simple extraction: "ALUM.L" -> "ALUM", "^GSPC" -> "^GSPC"
+            # But let's be careful with providers. If it's "YAHOO:^GSPC", we want "^GSPC".
+            clean_name = token.split(":")[-1]
 
     # 3. Build tickers dict (prefer online metadata, fallback to criteria.symbol)
     tickers_dict: dict[str, str] | None = None
