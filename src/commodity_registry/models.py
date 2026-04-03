@@ -1,6 +1,9 @@
 import datetime
+import logging
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_market_data.models import (
@@ -30,6 +33,39 @@ class AssetClass(str, Enum):
     CASH = "Cash"
     CRYPTO = "Crypto"
     COMMODITY = "Commodity"
+
+
+_ASSET_CLASS_MAP: list[tuple[str, AssetClass]] = []
+
+
+def _get_asset_class_map() -> list[tuple[str, AssetClass]]:
+    """Lazy-load the asset class mapping."""
+    global _ASSET_CLASS_MAP
+    if not _ASSET_CLASS_MAP:
+        _ASSET_CLASS_MAP = [
+            ("ETF", AssetClass.EQUITY_ETF),
+            ("STOCK", AssetClass.STOCK),
+            ("EQUITY", AssetClass.STOCK),
+            ("CRYPTO", AssetClass.CRYPTO),
+            ("FOREX", AssetClass.CASH),
+            ("CASH", AssetClass.CASH),
+            ("CURRENCY", AssetClass.CASH),
+        ]
+    return _ASSET_CLASS_MAP
+
+
+def _map_asset_class(raw: str | AssetClass | None) -> AssetClass | None:
+    """Maps a raw asset class string or Enum to an AssetClass enum."""
+    if raw is None:
+        return None
+    if isinstance(raw, AssetClass):
+        return raw
+
+    upper = str(raw).upper()
+    for keyword, aclass in _get_asset_class_map():
+        if keyword in upper:
+            return aclass
+    return None
 
 
 class RiskProfile(str, Enum):

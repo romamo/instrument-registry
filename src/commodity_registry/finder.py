@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from .models import AssetClass
     from .registry import CommodityRegistry
 
+from .models import _map_asset_class
+
 import diskcache  # type: ignore[import-untyped]
 import platformdirs
 from pydantic_market_data.models import Currency, CurrencyCode, Price, SecurityCriteria, Ticker
@@ -103,34 +105,28 @@ def fetch_metadata(
     )
 
 
-_ASSET_CLASS_MAP: list[tuple[str, AssetClass]] = []
-
-
-def _get_asset_class_map() -> list[tuple[str, AssetClass]]:
-    """Lazy-load the asset class mapping to avoid circular imports."""
-    global _ASSET_CLASS_MAP
-    if not _ASSET_CLASS_MAP:
-        from .models import AssetClass
-
-        _ASSET_CLASS_MAP = [
-            ("ETF", AssetClass.EQUITY_ETF),
-            ("STOCK", AssetClass.STOCK),
-            ("EQUITY", AssetClass.STOCK),
-            ("CRYPTO", AssetClass.CRYPTO),
-        ]
-    return _ASSET_CLASS_MAP
-
-
-def _map_asset_class(raw: str) -> AssetClass | None:
-    """Maps a raw asset class string to an AssetClass enum, or None if unmapped."""
-    upper = raw.upper()
-    for keyword, aclass in _get_asset_class_map():
-        if keyword in upper:
-            return aclass
-    return None
 
 
 @cache.memoize(expire=86400)
+def derive_provider_ticker(
+    name: str, asset_class: AssetClass | str | None, provider: ProviderName | str
+) -> str | None:
+    """
+    Derives a provider-specific ticker based on a commodity's name and asset class.
+    Used when an explicit ticker is missing from the registry.
+    """
+    # Normalize provider name
+    p_name = provider.value if isinstance(provider, ProviderName) else str(provider).lower()
+
+    if p_name == ProviderName.YAHOO.value:
+        # Yahoo Crypto Pattern: {TOKEN}-USD
+        ac = str(asset_class).upper() if asset_class else ""
+        if ("CRYPTO" in ac) and "-" not in name:
+            return f"{name}-USD"
+
+    return None
+
+
 def search_isin(criteria: SecurityCriteria) -> list[SearchResult]:
     """
     Searches for securities across all providers using SecurityCriteria.
@@ -149,6 +145,14 @@ def search_isin(criteria: SecurityCriteria) -> list[SearchResult]:
                     if symbol_result.asset_class
                     else None
                 )
+                
+                # Filtering by requested asset_class if provided
+                if criteria.asset_class:
+                    req_aclass = _map_asset_class(criteria.asset_class)
+                    if req_aclass and aclass and aclass != req_aclass:
+                        logger.debug(f"Skipping result {symbol_result.ticker} due to asset class mismatch")
+                        continue
+
                 results.append(
                     SearchResult(
                         provider=p,
@@ -169,6 +173,16 @@ def search_isin(criteria: SecurityCriteria) -> list[SearchResult]:
             continue
         else:
             logger.debug(f"No results from provider {p} for {criteria.isin or criteria.symbol}")
+
+    # Fallback for Crypto: if no results found and it looks like a crypto asset class is requested
+    if not results and criteria.symbol and criteria.asset_class:
+        derived = derive_provider_ticker(
+            str(criteria.symbol), criteria.asset_class, ProviderName.YAHOO
+        )
+        if derived and derived != str(criteria.symbol):
+            crypto_criteria = criteria.model_copy(update={"symbol": derived})
+            logger.debug(f"Retrying resolution with derived ticker: {crypto_criteria.symbol}")
+            return search_isin(crypto_criteria)
 
     return results
 
@@ -279,8 +293,10 @@ def resolve_security(
         if candidates:
             cand = candidates[0]
             # Convert Commodity to SearchResult
+            # Determine the best ticker and source from registry + derivation
             best_ticker = None
             source = ProviderName.YAHOO
+
             if cand.tickers:
                 if cand.tickers.yahoo:
                     best_ticker = cand.tickers.yahoo
@@ -291,6 +307,14 @@ def resolve_security(
                 elif cand.tickers.google:
                     best_ticker = cand.tickers.google
                     source = ProviderName.GOOGLE
+
+            if not best_ticker:
+                # Better way to bypass hardcoding: Derive ticker if missing from registry
+                best_ticker = derive_provider_ticker(cand.name, cand.asset_class, ProviderName.YAHOO)
+                source = ProviderName.YAHOO
+
+            # Fallback to name as ticker if still missing
+            ticker_vo = Ticker(best_ticker) if best_ticker else Ticker(cand.name)
 
             # Optional: Fetch price (current or historical)
             price = None
@@ -312,13 +336,21 @@ def resolve_security(
             )
 
     # 2. Programmatic FX Resolution
+    # Only perform FX resolution if the user is searching for CASH/FOREX
+    # or hasn't specified an asset class. Symbols like 'TRX' should be resolved
+    # via online search if looking for Crypto.
     if criteria.symbol:
-        # Check if it looks like a currency pair
-        fx_res = resolve_currency(
-            str(criteria.symbol), target_currency=criteria.currency, verify=verify
+        from .models import AssetClass
+        is_cash_search = (
+            criteria.asset_class is None or
+            _map_asset_class(criteria.asset_class) == AssetClass.CASH
         )
-        if fx_res:
-            return fx_res
+        if is_cash_search:
+            fx_res = resolve_currency(
+                str(criteria.symbol), target_currency=criteria.currency, verify=verify
+            )
+            if fx_res:
+                return fx_res
 
     # 3. Online Search
     results = search_isin(criteria)

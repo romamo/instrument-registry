@@ -20,6 +20,7 @@ from pydantic_market_data.cli_models import (
     SYMBOL,
     GlobalArgs,
     PatchedCliSettingsSource,
+    CLASS,
 )
 from pydantic_market_data.cli_models import (
     ISIN as ISIN_HELP,
@@ -122,6 +123,9 @@ class resolve(CommonArgs):
     price: PRICE | None = Field(None, description="Validation price for matching")
     dry_run: bool = Field(False, description="Parse and resolve without persisting changes")
     report_price: bool = Field(False, description="Fetch and include current price in output")
+    asset_class: CLASS | None = Field(
+        None, description="Asset class (Equity, Stock, Crypto, ETF, Index, etc.)"
+    )
 
     def cli_cmd(self) -> None:
         from .finder import get_available_providers, resolve_and_persist, verify_ticker
@@ -138,6 +142,7 @@ class resolve(CommonArgs):
             currency=CurrencyCode(Currency(self.currency.upper())) if self.currency else None,
             target_price=Price(self.price) if self.price else None,
             target_date=pd.to_datetime(self.date).date() if self.date else None,
+            asset_class=self.asset_class,
         )
 
         # By default, use the first registry path as the target for new discoveries

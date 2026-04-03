@@ -6,7 +6,7 @@ import yaml
 from pydantic_market_data.models import Currency, SecurityCriteria, Ticker
 
 from .interfaces import SearchResult
-from .models import AssetClass, Commodity, CommodityFile, InstrumentType
+from .models import AssetClass, Commodity, CommodityFile, InstrumentType, _map_asset_class
 from .resources import get_commodity_files
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class CommodityRegistry:
         self._load_errors: list[str] = []
         self._by_isin: dict[str, list[Commodity]] = {}
         self._by_figi: dict[str, Commodity] = {}
-        self._by_name: dict[str, Commodity] = {}
+        self._by_name: dict[str, list[Commodity]] = {}
         self._by_ticker: dict[str, Commodity] = {}  # Map "PROVIDER:TICKER" -> Commodity
 
         if include_bundled:
@@ -88,7 +88,13 @@ class CommodityRegistry:
                 self._by_isin[isin_key].insert(0, c)  # User overrides first
 
         self._by_figi = {}
-        self._by_name = {c.name.upper(): c for c in self._commodities}
+        self._by_name = {}
+        for c in self._commodities:
+            name_key = c.name.upper()
+            if name_key not in self._by_name:
+                self._by_name[name_key] = []
+            self._by_name[name_key].append(c)
+
         self._by_ticker = {}
 
         for c in self._commodities:
@@ -119,21 +125,38 @@ class CommodityRegistry:
         # 2. Try Name/Symbol (Strict)
         if criteria.symbol:
             sym_upper = str(criteria.symbol).upper()
-            if sym_upper in self._by_name:
-                candidates.append(self._by_name[sym_upper])
+            sym_matches = self._by_name.get(sym_upper, [])
+            candidates.extend(sym_matches)
 
         # 3. Try FIGI (Strict)
         # Note: FIGI lookup isn't explicitly in SecurityCriteria yet, but we have it in index.
 
-        # Deduplicate (by name)
+        # 4. Filter by Asset Class if provided
+        if criteria.asset_class:
+            target_ac = _map_asset_class(criteria.asset_class)
+            if not target_ac:
+                # If an asset class was requested but is unrecognizable,
+                # we must fail the registry lookup to prevent incorrect matches.
+                return []
+            
+            candidates = [
+                c
+                for c in candidates
+                if _map_asset_class(c.asset_class) == target_ac
+            ]
+
+        # Deduplicate (by name + asset_class to allow multiple types of same symbol)
         seen = set()
         unique_candidates = []
         for c in candidates:
-            if c.name not in seen:
+            # Note: We use name+asset_class as unique key in this context
+            # to allow TRX(Stock) and TRX(Crypto) to both be returned if needed.
+            key = (c.name.upper(), c.asset_class)
+            if key not in seen:
                 unique_candidates.append(c)
-                seen.add(c.name)
+                seen.add(key)
 
-        # 4. Filter by Currency if provided
+        # 5. Filter by Currency if provided
         if criteria.currency:
             curr_str = str(criteria.currency)
             unique_candidates = [
