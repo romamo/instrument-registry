@@ -9,13 +9,12 @@ if TYPE_CHECKING:
     from .models import AssetClass
     from .registry import CommodityRegistry
 
-from .models import _map_asset_class
-
 import diskcache  # type: ignore[import-untyped]
 import platformdirs
 from pydantic_market_data.models import Currency, CurrencyCode, Price, SecurityCriteria, Ticker
 
 from .interfaces import CommodityLookup, DataProvider, ProviderName, SearchResult
+from .models import _map_asset_class
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +104,6 @@ def fetch_metadata(
     )
 
 
-
-
 @cache.memoize(expire=86400)
 def derive_provider_ticker(
     name: str, asset_class: AssetClass | str | None, provider: ProviderName | str
@@ -145,12 +142,14 @@ def search_isin(criteria: SecurityCriteria) -> list[SearchResult]:
                     if symbol_result.asset_class
                     else None
                 )
-                
+
                 # Filtering by requested asset_class if provided
                 if criteria.asset_class:
                     req_aclass = _map_asset_class(criteria.asset_class)
                     if req_aclass and aclass and aclass != req_aclass:
-                        logger.debug(f"Skipping result {symbol_result.ticker} due to asset class mismatch")
+                        logger.debug(
+                            f"Skipping result {symbol_result.ticker} due to asset class mismatch"
+                        )
                         continue
 
                 results.append(
@@ -310,11 +309,10 @@ def resolve_security(
 
             if not best_ticker:
                 # Better way to bypass hardcoding: Derive ticker if missing from registry
-                best_ticker = derive_provider_ticker(cand.name, cand.asset_class, ProviderName.YAHOO)
+                best_ticker = derive_provider_ticker(
+                    cand.name, cand.asset_class, ProviderName.YAHOO
+                )
                 source = ProviderName.YAHOO
-
-            # Fallback to name as ticker if still missing
-            ticker_vo = Ticker(best_ticker) if best_ticker else Ticker(cand.name)
 
             # Optional: Fetch price (current or historical)
             price = None
@@ -343,9 +341,10 @@ def resolve_security(
     # via online search if looking for Crypto.
     if criteria.symbol:
         from .models import AssetClass
+
         is_cash_search = (
-            criteria.asset_class is None or
-            _map_asset_class(criteria.asset_class) == AssetClass.CASH
+            criteria.asset_class is None
+            or _map_asset_class(criteria.asset_class) == AssetClass.CASH
         )
         if is_cash_search:
             fx_res = resolve_currency(
@@ -477,4 +476,9 @@ def fetch_price(
     # Boundary conversion
     ticker_vo = Ticker(ticker) if not isinstance(ticker, Ticker) else ticker
     val = data_provider.get_price(ticker_vo, date=date)
-    return Price(val) if val is not None else None
+    if val is None:
+        return None
+    # Support both float (from Protocol) and Price (from actual implementations)
+    if isinstance(val, Price):
+        return val
+    return Price(val)

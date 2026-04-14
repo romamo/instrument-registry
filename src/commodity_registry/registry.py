@@ -138,12 +138,8 @@ class CommodityRegistry:
                 # If an asset class was requested but is unrecognizable,
                 # we must fail the registry lookup to prevent incorrect matches.
                 return []
-            
-            candidates = [
-                c
-                for c in candidates
-                if _map_asset_class(c.asset_class) == target_ac
-            ]
+
+            candidates = [c for c in candidates if _map_asset_class(c.asset_class) == target_ac]
 
         # Deduplicate (by name + asset_class to allow multiple types of same symbol)
         seen = set()
@@ -206,6 +202,7 @@ def add_commodity(
     dry_run: bool = False,
     registry: CommodityRegistry | None = None,
     country: str | None = None,
+    ibkr: int | None = None,
 ) -> Commodity:
     """
     Adds a new commodity to the registry.
@@ -266,6 +263,11 @@ def add_commodity(
             tickers_dict = {parts[0].lower(): parts[1]}
         else:
             tickers_dict = {"yahoo": symbol_str}
+
+    if ibkr:
+        if not tickers_dict:
+            tickers_dict = {}
+        tickers_dict["ibkr"] = ibkr
 
     # 4. Create commodity
     from .models import Tickers, ValidationPoint

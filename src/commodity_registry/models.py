@@ -3,14 +3,14 @@ import logging
 from enum import Enum
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from pydantic import BaseModel, Field, field_validator
 from pydantic_market_data.models import (
     ISIN,
     CurrencyCode,
     Price,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class InstrumentType(str, Enum):
@@ -68,23 +68,11 @@ def _map_asset_class(raw: str | AssetClass | None) -> AssetClass | None:
     return None
 
 
-class RiskProfile(str, Enum):
-    LOW = "Low"
-    MEDIUM = "Medium"
-    HIGH = "High"
-    SPECULATIVE = "Speculative"
-
-
-class Liquidity(str, Enum):
-    INSTANT = "Instant"
-    T_PLUS_2 = "T+2"
-    LOCKED = "Locked"
-
-
 class Tickers(BaseModel):
     yahoo: str | None = None
     ft: str | None = Field(None, description="Financial Times ticker")
     google: str | None = None
+    ibkr: int | None = Field(None, description="Interactive Brokers conid")
 
 
 class ValidationPoint(BaseModel):
@@ -120,8 +108,6 @@ class Commodity(BaseModel):
         None, description="Historical verification price points"
     )
     provider: str | None = None
-    risk_profile: RiskProfile | None = None
-    liquidity: Liquidity | None = None
     country: str | None = Field(None, description="Country or region of origin")
     metadata: dict[str, Any] | None = Field(None, description="Extra metadata")
 

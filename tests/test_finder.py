@@ -101,6 +101,8 @@ def test_resolve_security_registry_match():
     mock_comm.tickers.yahoo = "GC=F"
     mock_comm.asset_class = "Commodity"
     mock_comm.instrument_type = "Future"
+    mock_comm.country = None
+    mock_comm.metadata = None
 
     mock_reg.find_candidates.return_value = [mock_comm]
 

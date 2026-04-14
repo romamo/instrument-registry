@@ -10,12 +10,12 @@ requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "pydantic-market-data>=0.1.9",
+    "pydantic-market-data==0.1.17",
     "diskcache>=5.6.3",
     "platformdirs>=4.9.2",
     "pydantic-settings>=2.7.1",
     "py-ftmarkets>=0.1.5",
-    "py-yfinance>=0.1.7",
+    "py-yfinance>=0.1.12",
 ]
 readme = "README.md"
 
@@ -26,7 +26,7 @@ Issues = "https://github.com/romamo/commodity-registry/issues"
 
 [project.optional-dependencies]
 providers = [
-    "py-yfinance>=0.1.6",
+    "py-yfinance>=0.1.12",
     "py-ftmarkets>=0.1.2",
 ]
 
@@ -52,6 +52,14 @@ packages = ["src/commodity_registry"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/commodity_registry"]
+exclude = [
+    "/.github",
+    "/.idea",
+    "/tests",
+    "/.mypy_cache",
+    "/.pytest_cache",
+    "/.ruff_cache",
+]
 
 [tool.ruff]
 line-length = 100

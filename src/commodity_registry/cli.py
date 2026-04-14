@@ -12,6 +12,7 @@ from pydantic import (
     Field,
 )
 from pydantic_market_data.cli_models import (
+    CLASS,
     CURR,
     DATE,
     NAME,
@@ -20,7 +21,6 @@ from pydantic_market_data.cli_models import (
     SYMBOL,
     GlobalArgs,
     PatchedCliSettingsSource,
-    CLASS,
 )
 from pydantic_market_data.cli_models import (
     ISIN as ISIN_HELP,
@@ -84,7 +84,7 @@ class CommonArgs(GlobalArgs, BaseModel):
         extra="forbid",
     )
     registry_path: list[PATHS] = Field(
-        default=[PATHS("data/commodities/")],
+        default=[],
         description="Comma-separated paths to your user registry files or directories",
     )
     bundled: bool = Field(True, description="Exclude the bundled database")
@@ -114,6 +114,11 @@ def _is_isin(token: str) -> bool:
     return len(token) == 12 and upper[:2].isalpha() and upper.isalnum()
 
 
+def _is_ibkr_conid(token: str) -> bool:
+    """Returns True if token is a numeric string (IBKR conid)."""
+    return token.isdigit()
+
+
 class resolve(CommonArgs):
     command: Literal["resolve"] = "resolve"
     token: CliPositionalArg[Token]
@@ -133,7 +138,33 @@ class resolve(CommonArgs):
         logger.info(f"Resolving token: {self.token}")
         reg = self.get_registry()
 
-        # Build Criteria
+        # 1. Check for IBKR conid (pure numeric)
+        if _is_ibkr_conid(self.token):
+            logger.info(
+                f"Numeric token detected. Checking registry for IBKR conid: {self.token}..."
+            )
+            # Numeric tokens are matched directly against IBKR ticker index
+            res_comp = reg.find_by_ticker("IBKR", self.token)
+            if res_comp:
+                # Mock a search result for CLI display
+                from .interfaces import ProviderName, SearchResult
+
+                res = SearchResult(
+                    provider=ProviderName.YAHOO,  # Fallback provider
+                    ticker=res_comp.tickers.yahoo if res_comp.tickers else res_comp.name,
+                    name=res_comp.name,
+                    currency=res_comp.currency,
+                    asset_class=res_comp.asset_class,
+                    instrument_type=res_comp.instrument_type,
+                    country=res_comp.country,
+                )
+                print(
+                    f"Resolved (via IBKR conid): {res.name} -> "
+                    f"{str(res.ticker)} (IBKR:{self.token})"
+                )
+                return
+
+        # 2. Build Standard Criteria
         isin = self.token if _is_isin(self.token) else None
         symbol = self.token if not isin else None
         criteria = SecurityCriteria(
@@ -193,11 +224,15 @@ class resolve(CommonArgs):
             p_val = getattr(res.price, "value", res.price) if res.price else 0.0
             p_label = f"Price {res.price_date}" if res.price_date else "Last Price"
             price_str = f" [{p_label}: {p_val:.2f} {res.currency}]" if res.price else ""
-            
+
             country_str = f" | Country: {res.country}" if res.country else ""
             meta_str = f" | Meta: {res.metadata}" if res.metadata else ""
 
-            print(f"Resolved: {res.name} -> {str(res.ticker)} ({res.provider.value}){price_str}{country_str}{meta_str}")
+            msg = (
+                f"Resolved: {res.name} -> {str(res.ticker)} "
+                f"({res.provider.value}){price_str}{country_str}{meta_str}"
+            )
+            print(msg)
 
 
 class lint(CommonArgs):
@@ -429,6 +464,7 @@ class add(CommonArgs):
     )
     currency: CURR | None = Field(None, description="Primary currency")
     figi: str | None = Field(None, description="FIGI identifier")
+    ibkr: int | None = Field(None, description="Interactive Brokers conid")
     country: str | None = Field(None, description="Country or region of origin")
     validation_date: DATE | None = Field(None, description="Date for initial verification")
     validation_price: PRICE | None = Field(None, description="Price for initial verification")
@@ -532,6 +568,7 @@ class add(CommonArgs):
                 dry_run=self.dry_run,
                 registry=reg,
                 country=self.country,
+                ibkr=self.ibkr,
             )
             print(f"Successfully processed {commodity.name}")
         except ValueError as e:
@@ -582,6 +619,12 @@ class AppCLI(BaseSettings, GlobalArgs):
         cli_hide_none_type=True,
     )
 
+    registry_path: list[PATHS] = Field(
+        default=[PATHS("data/commodities/")],
+        description="Comma-separated paths to your user registry files or directories",
+    )
+    bundled: bool = Field(True, description="Exclude the bundled database")
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -601,11 +644,25 @@ class AppCLI(BaseSettings, GlobalArgs):
 
     subcommand: CliSubCommand[resolve | fetch | lint | add]
 
+    def get_registry(self):
+        extra_paths = []
+        for p_str in self.registry_path:
+            p_obj = Path(p_str).expanduser()
+            if p_obj.exists():
+                extra_paths.append(p_obj)
+        return get_registry(include_bundled=self.bundled, extra_paths=extra_paths)
+
     def cli_cmd(self) -> None:
         # Propagate v/vv and format flags from subcommand if root doesn't have them set
         v = self.v or getattr(self.subcommand, "v", False)
         vv = self.vv or getattr(self.subcommand, "vv", False)
         format_val = getattr(self.subcommand, "format", self.format) or self.format
+
+        # Propagate registry_path and bundled to subcommand
+        if hasattr(self.subcommand, "registry_path") and not self.subcommand.registry_path:
+            self.subcommand.registry_path = self.registry_path
+        if hasattr(self.subcommand, "bundled"):
+            self.subcommand.bundled = self.bundled
 
         # Ensure the subcommand instance has the propagated values
         for attr, val in [("v", v), ("vv", vv), ("format", format_val)]:
