@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
+import sys
+from typing import Any
 
 import agentyper as typer
 import pandas as pd  # type: ignore[import-untyped]
@@ -17,9 +20,21 @@ from . import common
 logger = logging.getLogger(__name__)
 
 
+def _read_pipe() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        common.exit_with_error("Stdin is empty", error_type="ArgError")
+        raise AssertionError("unreachable")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        common.exit_with_error(f"Invalid JSON from stdin: {exc}", error_type="ArgError")
+        raise AssertionError("unreachable") from None
+
+
 def command(
     ctx: typer.Context,
-    query: str,
+    query: str | None = typer.Argument(None, help="Instrument query or identifier"),  # noqa: B008
     registry_path: str | None = common.REGISTRY_PATH_OPTION,
     no_bundled: bool = common.NO_BUNDLED_OPTION,
     provider: str | None = typer.Option(
@@ -61,10 +76,9 @@ def command(
         no_bundled=no_bundled,
     )
 
-    logger.info("Resolving query: %s", query)
     reg = common.registry()
 
-    if common.is_ibkr_conid(query):
+    if query is not None and common.is_ibkr_conid(query):
         logger.info("Numeric query detected. Checking registry for IBKR conid: %s...", query)
         res_comp = reg.find_by_ticker("IBKR", query)
         if res_comp:
@@ -85,8 +99,29 @@ def command(
             )
             return
 
-    isin = query if common.is_isin(query) else None
-    symbol = query if not isin else None
+    isin: str | None
+    symbol: str | None
+    if query is not None:
+        isin = query if common.is_isin(query) else None
+        symbol = query if not isin else None
+        query_label = query
+    else:
+        if sys.stdin.isatty():
+            common.exit_with_error("No query provided", error_type="ArgError")
+            raise AssertionError("unreachable")
+        pipe_data = _read_pipe()
+        isin = pipe_data.get("isin")
+        symbol = pipe_data.get("symbol")
+        currency = currency or pipe_data.get("currency")
+        asset_class = asset_class or pipe_data.get("asset_class")
+        if price is None and pipe_data.get("target_price") is not None:
+            price = float(pipe_data["target_price"])
+        if date is None and pipe_data.get("target_date") is not None:
+            date = str(pipe_data["target_date"])
+        query_label = isin or symbol or "(stdin)"
+
+    logger.info("Resolving query: %s", query_label)
+
     criteria = SecurityCriteria(
         isin=isin,
         symbol=symbol,
@@ -110,10 +145,10 @@ def command(
         providers = get_available_providers()
         if not providers:
             common.exit_with_error(
-                f"Could not resolve '{query}'. Install providers: uv tool install "
+                f"Could not resolve '{query_label}'. Install providers: uv tool install "
                 "'instrument-registry[providers]'"
             )
-        common.exit_with_error(f"Could not resolve '{query}'")
+        common.exit_with_error(f"Could not resolve '{query_label}'")
     assert res is not None
 
     if date and price is not None:
