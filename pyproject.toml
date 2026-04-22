@@ -1,6 +1,6 @@
 [project]
 name = "instrument-registry"
-version = "0.2.4"
+version = "0.2.5"
 description = "Resolve and maintain canonical financial instrument records from ISINs, symbols, and names"
 authors = [
     { name = "Roman Medvedev", email = "pypi@romavm.dev" }
