@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-04-23
+
+### Added
+- **`resolve` JSONL stdin**: The `resolve` command now accepts multiple records piped as JSONL (one JSON object per line). Single JSON objects, JSON arrays, and JSONL streams are all detected automatically. Each record is resolved independently; blank lines are skipped and any malformed line exits immediately with a clear error.
+
 ## [0.2.6] - 2026-04-22
 
 ### Added
