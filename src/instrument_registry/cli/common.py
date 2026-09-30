@@ -10,7 +10,7 @@ from typing import Any
 
 import agentyper as typer
 
-from ..registry import get_registry
+from ..registry import InstrumentRegistry, get_registry
 
 logger = logging.getLogger(__name__)
 REGISTRY_PATH_ENV_VAR = "INSTRUMENT_REGISTRY_PATH"
@@ -151,24 +151,19 @@ def configure_registry_scope(
     STATE.bundled = not no_bundled
 
 
-def existing_registry_paths() -> list[Path]:
-    extra_paths = []
-    for path_str in STATE.registry_paths:
-        path_obj = Path(path_str).expanduser()
-        if path_obj.exists():
-            extra_paths.append(path_obj)
-    return extra_paths
-
-
 def primary_registry_path() -> Path | None:
     if not STATE.registry_paths:
         return None
     return Path(STATE.registry_paths[0]).expanduser()
 
 
+def open_registry(registry_paths: list[str], *, bundled: bool) -> InstrumentRegistry:
+    extra_paths = [p for p in (Path(s).expanduser() for s in registry_paths) if p.exists()]
+    return get_registry(include_bundled=bundled, extra_paths=extra_paths or None)
+
+
 def registry() -> Any:
-    extra_paths = existing_registry_paths()
-    return get_registry(include_bundled=STATE.bundled, extra_paths=extra_paths or None)
+    return open_registry(STATE.registry_paths, bundled=STATE.bundled)
 
 
 def require_write_target() -> Path:

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Python 3.14 or newer is required** (was 3.10). The CLI is moving to [treaty](https://github.com/romamo/treaty), which requires 3.14
+- **`fetch` runs on treaty** (breaking for callers that parse its output):
+  - Piped output is a JSON envelope; the result moves from the top level to `data`, and `metadata` is `{}` instead of `null` when empty
+  - A missing match exits `5` (`NOT_FOUND`) instead of logging a warning and exiting `0`
+  - A missing live-data provider exits `79` (`MISSING_PROVIDER`) instead of `1`
+  - At least one of `--isin`, `--figi`, `--symbol` is required, and a malformed identifier exits `2` before any lookup
+  - `--price` reports a `PRICE_UNAVAILABLE` warning when no price comes back, instead of silently leaving `price` empty
+  - `-v`/`-vv` go after the command (`instrument-reg fetch -v ...`), and `--registry-path` may be repeated
+- `instrument-reg manifest` prints the treaty manifest for the commands migrated so far
+- `InstrumentType`, `AssetClass`, and `ProviderName` are `StrEnum`s: `str()` and f-strings give the value (`"Stock"`) instead of `"AssetClass.STOCK"`
+
+### Dependencies
+- Added `treaty>=1.0.0rc5`
+
 ## [0.2.14] - 2026-09-30
 
 ### Fixed

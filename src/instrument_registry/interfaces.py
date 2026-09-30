@@ -5,7 +5,7 @@ Defines Protocols for type safety and Pydantic models for typed returns.
 """
 
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ from pydantic_market_data.models import (
 from .models import AssetClass, Instrument, InstrumentType
 
 
-class ProviderName(str, Enum):
+class ProviderName(StrEnum):
     YAHOO = "yahoo"
     FT = "ft"
     GOOGLE = "google"

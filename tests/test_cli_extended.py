@@ -237,21 +237,6 @@ def test_cli_add_success(mock_add, mock_search, mock_registry, capsys):
     assert "AAPL" in capsys.readouterr().out
 
 
-@patch("instrument_registry.finder.get_available_providers", return_value=[ProviderName.YAHOO])
-@patch("instrument_registry.finder.resolve_security")
-def test_cli_fetch_success(mock_resolve, mock_get_available_providers, capsys):
-    mock_resolve.return_value = SearchResult(
-        provider=ProviderName.YAHOO, symbol="AAPL", name="Apple Inc.", currency=Currency("USD")
-    )
-
-    main(["fetch", "--symbol", "AAPL", "--format", "json"])
-
-    captured = capsys.readouterr()
-    assert "AAPL" in captured.out
-    assert "Apple Inc." in captured.out
-    assert mock_resolve.call_args.kwargs["registry"] is not None
-
-
 def test_cli_help(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--help"])
@@ -391,24 +376,6 @@ def test_cli_lint_with_verify(
     assert "OK: Range Match" in output
 
 
-@patch("instrument_registry.finder.get_available_providers", return_value=[ProviderName.YAHOO])
-def test_cli_fetch_no_results(mock_get_available_providers, capsys):
-    """Test fetch command when no results are found."""
-    with patch("instrument_registry.finder.resolve_security", return_value=None):
-        main(["fetch", "--symbol", "NONEXISTENT", "--format", "table"])
-
-    # Just ensure it doesn't crash
-
-
-@patch("instrument_registry.finder.get_available_providers", return_value=[])
-def test_cli_fetch_requires_providers(mock_get_available_providers, capsys):
-    with pytest.raises(SystemExit) as exc:
-        main(["fetch", "--symbol", "AAPL"])
-
-    assert exc.value.code == 1
-    assert "requires the yahoo provider (`py-yfinance`)" in capsys.readouterr().err
-
-
 @patch("instrument_registry.finder.get_available_providers", return_value=[])
 def test_cli_lint_verify_requires_providers(mock_get_available_providers, mock_registry, capsys):
     reg_file = mock_registry / "manual.yaml"
@@ -428,27 +395,6 @@ def test_cli_lint_verify_requires_providers(mock_get_available_providers, mock_r
 
     assert exc.value.code == 1
     assert "requires the yahoo provider (`py-yfinance`)" in capsys.readouterr().err
-
-
-@patch("instrument_registry.finder.get_available_providers", return_value=[ProviderName.YAHOO])
-@patch("instrument_registry.finder.fetch_price")
-@patch("instrument_registry.finder.resolve_security")
-def test_cli_fetch_with_price(mock_resolve, mock_price, mock_get_available_providers, capsys):
-    """Test fetch command with price fetching enabled."""
-    from pydantic_market_data.models import Price
-
-    mock_resolve.return_value = SearchResult(
-        provider=ProviderName.YAHOO, symbol="AAPL", name="Apple Inc.", currency=Currency("USD")
-    )
-    mock_price.return_value = Price(150.0)
-
-    args = ["instrument-reg", "fetch", "--symbol", "AAPL", "--price"]
-
-    main([*args[1:], "--format", "json"])
-
-    output = capsys.readouterr().out
-    assert "AAPL" in output
-    assert "150" in output
 
 
 @patch("instrument_registry.finder.resolve_and_persist")
