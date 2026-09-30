@@ -151,7 +151,7 @@ class InstrumentRegistry:
                 sym_matches = [c for c in sym_matches if str(c.currency).upper() == curr]
             candidates.extend(sym_matches)
 
-        # 4. Asset-class filter — only for symbol lookups; ISIN/FIGI are already unique identifiers
+        # 4. Asset-class filter: skipped when an ISIN is given, since it identifies one instrument
         if criteria.asset_class and candidates and not criteria.isin:
             target_ac = _map_asset_class(criteria.asset_class)
             if not target_ac:
