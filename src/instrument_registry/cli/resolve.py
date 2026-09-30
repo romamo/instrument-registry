@@ -50,41 +50,62 @@ def _coerce_asset_class(raw: str | None) -> PmdAssetClass | None:
 
 
 def _read_pipe() -> list[dict[str, Any]]:
-    raw = sys.stdin.read().strip()
-    if not raw:
-        common.exit_with_error("Stdin is empty", error_type="ArgError")
-        raise AssertionError("unreachable")
+    raw = sys.stdin.read()
     try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return [parsed]
-        if isinstance(parsed, list):
-            return parsed
-        common.exit_with_error("Stdin JSON must be an object or array", error_type="ArgError")
-        raise AssertionError("unreachable")
-    except json.JSONDecodeError:
-        pass
-    # JSONL: one JSON object per line
+        return _parse_pipe(raw)
+    except ValueError as exc:
+        common.exit_with_error(str(exc), error_type="ArgError")
+        raise AssertionError("unreachable") from None
+
+
+def _parse_pipe(raw: str) -> list[dict[str, Any]]:
+    """Query records from stdin text: JSON objects, arrays, or ok/data/error envelopes.
+
+    Values may be concatenated in any layout (JSONL, pretty-printed, or back to back).
+    An envelope contributes its ``data`` (each item of a list); ``data: null`` contributes
+    nothing; ``ok: false`` raises, so a failed upstream command is never read as input.
+    """
+    if not raw.strip():
+        raise ValueError("Stdin is empty")
+    decoder = json.JSONDecoder()
     records: list[dict[str, Any]] = []
-    for line_num, line in enumerate(raw.splitlines(), 1):
-        line = line.strip()
-        if not line:
-            continue
+    pos = 0
+    line_num = 1  # line where the next value starts, counted as pos advances
+    while True:
+        skip_from = pos
+        while pos < len(raw) and raw[pos] in " \t\n\r":
+            pos += 1
+        line_num += raw.count("\n", skip_from, pos)
+        if pos >= len(raw):
+            break
+        value_start = pos
         try:
-            obj = json.loads(line)
-            if not isinstance(obj, dict):
-                common.exit_with_error(
-                    f"JSONL line {line_num} must be a JSON object", error_type="ArgError"
-                )
-                raise AssertionError("unreachable")
-            records.append(obj)
+            value, pos = decoder.raw_decode(raw, pos)
         except json.JSONDecodeError as exc:
-            common.exit_with_error(f"Invalid JSON on line {line_num}: {exc}", error_type="ArgError")
-            raise AssertionError("unreachable") from None
-    if not records:
-        common.exit_with_error("Stdin contains no valid JSON objects", error_type="ArgError")
-        raise AssertionError("unreachable")
+            raise ValueError(f"Invalid JSON on line {exc.lineno}: {exc.msg}") from None
+        records.extend(_pipe_value_records(value, line_num))
+        line_num += raw.count("\n", value_start, pos)
     return records
+
+
+def _pipe_value_records(value: Any, line_num: int) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, dict) and "ok" in value and "data" in value:
+        if value["ok"] is not True:
+            error = value.get("error") or {}
+            raise ValueError(
+                f"Upstream command failed (line {line_num}): "
+                f"{error.get('code', 'ERROR')}: {error.get('message', 'no message')}"
+            )
+        data = value["data"]
+        items = [] if data is None else data if isinstance(data, list) else [data]
+    else:
+        items = [value]
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(f"Line {line_num}: expected a JSON object, got {type(item).__name__}")
+    return items
 
 
 def _resolve_criteria(

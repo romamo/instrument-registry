@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.13] - 2026-09-30
+
+### Fixed
+- **`resolve` reads response envelopes on stdin**: piped input may now be `{"ok": ..., "data": ...}` envelopes (one per line, pretty-printed, or streamed with a terminal `data: null` line) as well as bare JSON objects and arrays. An envelope contributes its `data`; one with `ok: false` fails the run with the upstream error code and message instead of being read as a query. `other-cli --format json | instrument-registry resolve` now works without `--format jsonl`
+- **Stdin errors name the line** where a bad value starts, including after pretty-printed values
+
 ## [0.2.12] - 2026-05-10
 
 ### Changed
