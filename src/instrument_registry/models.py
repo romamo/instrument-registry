@@ -1,6 +1,6 @@
 import datetime
 import logging
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -13,7 +13,7 @@ from pydantic_market_data.models import (
 logger = logging.getLogger(__name__)
 
 
-class InstrumentType(str, Enum):
+class InstrumentType(StrEnum):
     ETF = "ETF"
     ETC = "ETC"
     ETN = "ETN"
@@ -24,7 +24,7 @@ class InstrumentType(str, Enum):
     CASH = "Cash"
 
 
-class AssetClass(str, Enum):
+class AssetClass(StrEnum):
     EQUITY_ETF = "EquityETF"
     FIXED_INCOME_ETF = "FixedIncomeETF"
     COMMODITY_ETF = "CommodityETF"

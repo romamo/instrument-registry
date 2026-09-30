@@ -21,6 +21,8 @@ consistent local registry for Beancount and other financial workflows.
 
 ## Installation
 
+Requires Python 3.14 or newer.
+
 ```bash
 uv tool install instrument-registry
 ```
@@ -122,7 +124,10 @@ Fetch details using local registries first, then provider lookup when needed.
 
 ```bash
 instrument-reg fetch --isin US0378331005
+instrument-reg fetch --symbol AAPL --price
 ```
+
+`fetch` runs on [treaty](https://github.com/romamo/treaty): piped output is a JSON envelope (`{"ok", "data", "error", "warnings", "meta"}`) with the result under `data`, and a terminal gets plain text. Failures have their own exit codes: `2` bad arguments, `5` no match, `79` a live-data provider is not installed. `instrument-reg manifest` and `instrument-reg fetch --schema` describe the command for agents.
 
 ### Command Summary
 
