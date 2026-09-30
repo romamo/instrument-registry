@@ -77,7 +77,7 @@ def test_cli_registry_path_before_subcommand_is_not_supported(mock_log, mock_get
                 ]
             )
 
-    assert exc.value.code == 3  # ARG_ERROR — argparse rejects the unknown flag before dispatch
+    assert exc.value.code == 3  # distinct from general failure (1): callers can spot bad input
     assert mock_add.call_count == 0
 
 

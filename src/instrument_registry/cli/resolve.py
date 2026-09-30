@@ -157,19 +157,19 @@ def _resolve_criteria(
         providers = get_available_providers()
         if not providers:
             raise ResolutionFailed(
-                f"Could not resolve '{query_label}'. Install providers: uv tool install "
-                "'instrument-registry[providers]'"
+                f"Could not resolve '{query_label}'. "
+                f"Install providers: uv tool install 'instrument-registry[providers]'"
             )
         raise ResolutionFailed(f"Could not resolve '{query_label}'")
-    assert result is not None
 
     res, new_instrument = result
 
     if date and price is not None and new_instrument is not None:
         logger.info("Verifying price %s on %s...", price, date)
-        v_date = pd.to_datetime(date).date()
+        if price_on is None:
+            raise AssertionError(f"price_on must be set when date={date!r} and price are given")
         try:
-            if verify_ticker(res.symbol, v_date, price, provider=res.provider):
+            if verify_ticker(res.symbol, price_on.date, price, provider=res.provider):
                 typer.echo(f"  [OK] Verified {res.name} via {res.provider.upper()} ({res.symbol})")
             else:
                 raise ResolutionFailed(
@@ -178,15 +178,12 @@ def _resolve_criteria(
         except PriceVerificationError as exc:
             raise ResolutionFailed(f"  [!] FAILED: {exc}") from exc
 
-    if new_instrument is None:
-        _candidates = reg.find_candidates(criteria)
-        if _candidates:
-            typer.output(_candidates[0])
-            return
-    else:
+    if new_instrument is not None:
         typer.output(new_instrument)
-        return
-    typer.output(res)
+    elif _candidates := reg.find_candidates(criteria):
+        typer.output(_candidates[0])
+    else:
+        typer.output(res)
 
 
 def command(

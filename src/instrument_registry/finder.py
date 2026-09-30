@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import diskcache  # type: ignore[import-untyped]
 import platformdirs
+from pydantic import ValidationError as _PydanticValidationError
 from pydantic_market_data.models import (
     Currency,
     CurrencyCode,
@@ -34,7 +35,7 @@ _RAW_TYPE_MAP: list[tuple[str, InstrumentType, AssetClass]] = [
     ("ETP", InstrumentType.ETF, AssetClass.EQUITY_ETF),
     ("MUTUALFUND", InstrumentType.ETF, AssetClass.EQUITY_ETF),
     ("INDEX", InstrumentType.INDEX, AssetClass.STOCK),
-    ("CRYPTOCURRENCY", InstrumentType.CRYPTO, AssetClass.CRYPTO),
+    ("CRYPTO", InstrumentType.CRYPTO, AssetClass.CRYPTO),
     ("CURRENCY", InstrumentType.CASH, AssetClass.CASH),
     ("CASH", InstrumentType.CASH, AssetClass.CASH),
 ]
@@ -288,7 +289,16 @@ def _find_price_provider(
         # Prefer ISIN-based resolution to get provider-specific symbol format
         sym = ticker
         if isin:
-            resolved = dp.resolve(SecurityQuery(isin=isin, currency=currency))
+            try:
+                resolved = dp.resolve(SecurityQuery(isin=isin, currency=currency))
+            except _PydanticValidationError as exc:
+                # External provider returned a field value incompatible with pmdp's model
+                # (e.g. py_yfinance passes raw quoteType strings like "ETF" to Security.asset_class
+                # which only accepts PmdAssetClass literals). Treat as "provider can't resolve".
+                logger.debug(
+                    "Provider %s: validation error resolving ISIN %s: %s", p.value, isin, exc
+                )
+                continue
             if resolved:
                 sym = str(resolved.symbol)
             else:

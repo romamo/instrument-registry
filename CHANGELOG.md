@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14] - 2026-09-30
+
+### Fixed
+- **Price lookup skips a provider that returns an invalid ISIN match**: when a provider's `resolve` result fails `pydantic-market-data` validation (e.g. `py-yfinance` passing a raw `quoteType` such as `"ETF"` as the asset class), the provider is skipped and the next one is tried instead of the lookup crashing
+- **ISIN lookups ignore the asset-class filter**: an ISIN already identifies one instrument, so a registry match is no longer dropped because the requested asset class maps differently
+- **Crypto detection**: any provider security type containing `CRYPTO` now maps to `Crypto`, not only `CRYPTOCURRENCY`
+- **`resolve` price verification** uses the already-parsed `price_on` date instead of re-parsing `--date`
+
+### Internal
+- `resolve` output selection simplified
+
 ## [0.2.13] - 2026-09-30
 
 ### Fixed
