@@ -2,25 +2,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pd = pytest.importorskip("pandas")
 py_yfinance_source = pytest.importorskip("py_yfinance.source")
 YFinanceDataSource = py_yfinance_source.YFinanceDataSource
-
-
-# Simple mock for a DataFrame to avoid complex MagicMocking of .iloc
-class MockDataFrame:
-    def __init__(self, data):
-        self.data = data
-        self.empty = False
-
-    @property
-    def iloc(self):
-        return self
-
-    def __getitem__(self, index):
-        # Allow index access like df.iloc[-1]
-        if index == -1:
-            return self.data
-        raise IndexError("MockDataFrame only supports index -1")
 
 
 @patch("py_yfinance.source.yf.Ticker")
@@ -32,10 +16,10 @@ def test_get_price_optimization(mock_ticker_cls):
     mock_ticker_instance = MagicMock()
     mock_ticker_cls.return_value = mock_ticker_instance
 
-    # Create robust mock history
-    # get_price calls: hist = t.history(...); if not hist.empty; return hist.iloc[-1]["Close"]
-    mock_row = {"Close": 150.0}
-    mock_hist = MockDataFrame(mock_row)
+    # One daily bar; get_price drops bars without prices, then reads the last Close
+    mock_hist = pd.DataFrame(
+        {"Open": [149.0], "High": [151.0], "Low": [148.0], "Close": [150.0], "Volume": [1000]}
+    )
 
     mock_ticker_instance.history.return_value = mock_hist
 
