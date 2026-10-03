@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-03
+
+### Fixed
+- First published release of the 0.4.0 changes below: the 0.4.0 publish stopped at a test that read the developer's own user registry, so 0.4.0 never reached PyPI
+
 ## [0.4.0] - 2026-10-03
 
 ### Changed
