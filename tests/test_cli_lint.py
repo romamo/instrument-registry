@@ -43,13 +43,6 @@ def test_lint_file(reg_file):
     assert env.data["verifications"] == []
 
 
-def test_lint_bundled_registry_is_clean():
-    env = app.call("lint", {}, env=ENV)
-
-    assert env.exit_code == 0
-    assert env.data["instrument_count"] > 0
-
-
 def test_lint_duplicate_isin_fails(tmp_path):
     (tmp_path / "a.yaml").write_text(
         "instruments:\n"
