@@ -52,7 +52,7 @@ class FetchResult:
     isin: str | None = None
     figi: str | None = None
     ticker: str | None = None
-    metadata: dict[str, object] = Out(default_factory=dict, external=True)
+    metadata: dict[str, object] = Out(default_factory=dict, ordered=True, external=True)
 
     @classmethod
     def from_search_result(cls, res: SearchResult) -> Self:

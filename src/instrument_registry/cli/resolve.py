@@ -1,29 +1,29 @@
-from __future__ import annotations
-
+import datetime
 import json
 import logging
-import sys
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
-import agentyper as typer
-import pandas as pd  # type: ignore[import-untyped]
+from pydantic import ValidationError
 from pydantic_market_data import AssetClass as PmdAssetClass
 from pydantic_market_data.models import (
     Currency,
     CurrencyCode,
     Price,
     PriceOnDate,
-    PriceVerificationError,
     SecurityQuery,
 )
+from treaty import Arg, Batch, CliExit, Ctx, Exit, Flag, Item, ItemError, ParseError
 
+from ..registry import InstrumentRegistry, SaveEffect
 from . import common
+from .records import Effect, InstrumentRecord
+from .treaty_app import Registry, RegistryScope, WriteTarget, app, raise_missing_provider
 
 logger = logging.getLogger(__name__)
-
-
-class ResolutionFailed(Exception):
-    pass
+COMMAND_NAME = "instrument-reg resolve"
 
 
 _LOCAL_TO_PMD: dict[str, PmdAssetClass] = {
@@ -47,15 +47,6 @@ def _coerce_asset_class(raw: str | None) -> PmdAssetClass | None:
     except ValueError:
         pass
     return _LOCAL_TO_PMD.get(raw.lower().replace(" ", "").replace("_", ""))
-
-
-def _read_pipe() -> list[dict[str, Any]]:
-    raw = sys.stdin.read()
-    try:
-        return _parse_pipe(raw)
-    except ValueError as exc:
-        common.exit_with_error(str(exc), error_type="ArgError")
-        raise AssertionError("unreachable") from None
 
 
 def _parse_pipe(raw: str) -> list[dict[str, Any]]:
@@ -108,233 +99,242 @@ def _pipe_value_records(value: Any, line_num: int) -> list[dict[str, Any]]:
     return items
 
 
-def _resolve_criteria(
+def _query(
     *,
-    ctx: typer.Context,
     isin: str | None,
     symbol: str | None,
     figi: str | None,
     currency: str | None,
     asset_class: str | None,
-    price: float | None,
-    date: str | None,
-    price_on: PriceOnDate | None = None,
-    dry_run: bool,
-    report_price: bool,
-    reg: Any,
-    target_path: Any,
-) -> None:
-    from ..finder import get_available_providers, resolve_and_persist, verify_ticker
-
-    query_label = isin or figi or symbol or "(stdin)"
-    logger.info("Resolving query: %s", query_label)
-
-    if price is not None and date:
-        price_on = PriceOnDate(
-            price=Price(price),
-            date=pd.to_datetime(date).date(),
-        )
-
-    criteria = SecurityQuery(
+    price_on: PriceOnDate | None,
+) -> SecurityQuery:
+    return SecurityQuery(
         isin=isin,
         symbol=symbol,
         figi=figi,
         currency=CurrencyCode(Currency(currency.upper())) if currency else None,
-        price_on=price_on,
+        price_on=[price_on] if price_on else None,
         asset_class=_coerce_asset_class(asset_class),
     )
 
-    result = resolve_and_persist(
-        criteria,
-        registry=reg,
-        store=True,
-        target_path=target_path,
-        dry_run=dry_run,
-        include_price=report_price,
-    )
+
+def _resolve(
+    criteria: SecurityQuery,
+    *,
+    label: str,
+    lookup: InstrumentRegistry,
+    target_path: Path | None,
+    dry_run: bool,
+    report_price: bool,
+) -> InstrumentRecord:
+    """Resolve one query from the registry first, then providers, saving a new discovery"""
+    from ..finder import get_available_providers, resolve_and_persist
+
+    logger.info("Resolving query: %s", label)
+    try:
+        result = resolve_and_persist(
+            criteria,
+            registry=lookup,
+            store=True,
+            target_path=target_path,
+            dry_run=dry_run,
+            include_price=report_price,
+        )
+    except ImportError:
+        raise_missing_provider(None, COMMAND_NAME)
 
     if not result:
-        providers = get_available_providers()
-        if not providers:
-            raise ResolutionFailed(
-                f"Could not resolve '{query_label}'. "
-                f"Install providers: uv tool install 'instrument-registry[providers]'"
-            )
-        raise ResolutionFailed(f"Could not resolve '{query_label}'")
+        if not get_available_providers():
+            raise_missing_provider(None, COMMAND_NAME)
+        raise Exit.NOT_FOUND(
+            f"Could not resolve '{label}'.",
+            context={"query": label},
+            suggestion="check the identifier, or narrow it with --currency or --asset-class",
+        )
 
     res, new_instrument = result
-
-    if date and price is not None and new_instrument is not None:
-        logger.info("Verifying price %s on %s...", price, date)
-        if price_on is None:
-            raise AssertionError(f"price_on must be set when date={date!r} and price are given")
-        try:
-            if verify_ticker(res.symbol, price_on.date, price, provider=res.provider):
-                typer.echo(f"  [OK] Verified {res.name} via {res.provider.upper()} ({res.symbol})")
-            else:
-                raise ResolutionFailed(
-                    f"  [!] FAILED: Price {price} on {date} does not match {res.symbol}"
-                )
-        except PriceVerificationError as exc:
-            raise ResolutionFailed(f"  [!] FAILED: {exc}") from exc
-
     if new_instrument is not None:
-        typer.output(new_instrument)
-    elif _candidates := reg.find_candidates(criteria):
-        typer.output(_candidates[0])
+        effect = Effect.of_save(SaveEffect.CREATED, dry_run=dry_run)
+        record = InstrumentRecord.from_instrument(new_instrument, effect)
+    elif candidates := lookup.find_candidates(criteria):
+        record = InstrumentRecord.from_instrument(
+            candidates[0], Effect.of_save(None, dry_run=dry_run)
+        )
     else:
-        typer.output(res)
+        record = InstrumentRecord.from_search_result(res, Effect.of_save(None, dry_run=dry_run))
+    return record.with_price(res) if report_price else record
 
 
-def command(
-    ctx: typer.Context,
-    query: str | None = typer.Argument(None, help="Instrument query or identifier"),  # noqa: B008
-    registry_path: str | None = common.REGISTRY_PATH_OPTION,
-    no_bundled: bool = common.NO_BUNDLED_OPTION,
-    provider: str | None = typer.Option(
-        None,
-        "--provider",
-        help="Preferred provider name for external resolution",
-    ),  # noqa: B008
-    figi: str | None = typer.Option(
-        None,
-        "--figi",
-        help="FIGI identifier for direct security lookup via OpenFIGI",
-    ),  # noqa: B008
-    currency: str | None = typer.Option(
-        None,
-        "--currency",
-        help="Restrict matches to this currency code",
-    ),  # noqa: B008
-    date: str | None = typer.Option(
-        None,
-        "--date",
-        help="Historical date used with --price verification",
-    ),  # noqa: B008
-    price: float | None = typer.Option(
-        None,
-        "--price",
-        help="Historical price used with --date verification",
-    ),  # noqa: B008
-    report_price: bool = typer.Option(  # noqa: B008
-        False,
-        "--report-price",
-        is_flag=True,
-        help="Fetch and include the current price (or historical price if --date is given)",
-    ),
-    asset_class: str | None = typer.Option(
-        None,
-        "--asset-class",
-        help="Restrict matches to this asset class",
-    ),  # noqa: B008
-    no_save: bool = typer.Option(  # noqa: B008
-        False,
-        "--no-save",
-        is_flag=True,
-        help="Resolve and return output without writing to registry file",
-    ),
-) -> None:
-    """Resolve a query from local registries first, then external providers."""
-    del provider  # Provider filtering is not implemented yet.
-    from ..interfaces import ProviderName, SearchResult
-
-    common.configure_registry_scope(
-        ctx=ctx,
-        registry_path=registry_path,
-        no_bundled=no_bundled,
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolveOptions(RegistryScope):
+    currency: str | None = Flag(
+        default=None, pattern="[A-Za-z]{3}", description="Restrict matches to this currency code"
+    )
+    asset_class: str | None = Flag(default=None, description="Restrict matches to this asset class")
+    report_price: bool = Flag(
+        default=False,
+        description="Fetch and include the current price (or historical price if --date is given)",
+    )
+    dry_run: bool = Flag(
+        default=False, description="Resolve without writing new discoveries to the registry"
     )
 
-    reg = common.registry()
-    target_path = common.primary_registry_path()
 
-    if query is not None and common.is_ibkr_conid(query):
-        logger.info("Numeric query detected. Checking registry for IBKR conid: %s...", query)
-        res_comp = reg.find_by_ticker("IBKR", query)
-        if res_comp:
-            conid_result = SearchResult(
-                provider=ProviderName.YAHOO,
-                symbol=res_comp.tickers.yahoo if res_comp.tickers else res_comp.symbol,
-                name=res_comp.name or res_comp.symbol,
-                currency=res_comp.currency,
-                asset_class=res_comp.asset_class,
-                instrument_type=res_comp.instrument_type,
-                country=res_comp.country,
-            )
-            typer.output(conid_result)
-            return
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolveArgs(ResolveOptions):
+    query: str = Arg(description="ISIN, provider symbol, IBKR conid, or currency pair")
+    figi: str | None = Flag(
+        default=None, description="FIGI identifier for direct security lookup via OpenFIGI"
+    )
+    date: datetime.date | None = Flag(
+        default=None, description="Historical date to verify --price on"
+    )
+    price: Decimal | None = Flag(
+        default=None, description="Historical price the instrument traded at on --date"
+    )
 
-    if query is not None:
-        isin = query if common.is_isin(query) else None
-        symbol = query if not isin else None
+    def __post_init__(self) -> None:
+        if (self.date is None) != (self.price is None):
+            raise ParseError("pass --date and --price together")
         try:
-            _resolve_criteria(
-                ctx=ctx,
-                isin=isin,
-                symbol=symbol,
-                figi=figi,
-                currency=currency,
-                asset_class=asset_class,
-                price=price,
-                date=date,
-                dry_run=no_save,
-                report_price=report_price,
-                reg=reg,
-                target_path=target_path,
+            self.criteria()
+        except ValidationError as exc:
+            raise ParseError(f"invalid query: {exc.errors()[0]['msg']}") from exc
+
+    def criteria(self) -> SecurityQuery:
+        isin = self.query if common.is_isin(self.query) else None
+        price_on = (
+            PriceOnDate(price=Price(float(self.price)), date=self.date)
+            if self.price is not None and self.date is not None
+            else None
+        )
+        return _query(
+            isin=isin,
+            symbol=None if isin else self.query,
+            figi=self.figi,
+            currency=self.currency,
+            asset_class=self.asset_class,
+            price_on=price_on,
+        )
+
+
+@app.command(
+    "resolve",
+    description="Resolve a query from local registries first, then external providers",
+    danger_level="mutating",
+    has_network_io=True,
+    timeout=120,
+    exit_codes=["NOT_FOUND", "MISSING_PROVIDER"],
+    examples=[
+        ("Resolve Apple by ISIN", "instrument-reg resolve US0378331005"),
+        ("Resolve a currency pair", "instrument-reg resolve EUR/JPY"),
+        (
+            "Resolve and check a historical price, saving nothing",
+            "instrument-reg resolve US0378331005 --date 2024-01-02 --price 185.00 --dry-run",
+        ),
+    ],
+)
+def resolve(
+    args: ResolveArgs, ctx: Ctx, registry: Registry, target: WriteTarget
+) -> InstrumentRecord:
+    if common.is_ibkr_conid(args.query):
+        logger.info("Numeric query detected. Checking registry for IBKR conid: %s", args.query)
+        known = registry.lookup.find_by_ticker("IBKR", args.query)
+        if known is not None:
+            return InstrumentRecord.from_instrument(
+                known, Effect.of_save(None, dry_run=args.dry_run)
             )
-        except ResolutionFailed as exc:
-            common.exit_with_error(str(exc))
-    else:
-        if sys.stdin.isatty():
-            common.exit_with_error("No query provided", error_type="ArgError")
-            raise AssertionError("unreachable")
-        for pipe_data in _read_pipe():
-            rec_price = (
-                price
-                if price is not None
-                else (
-                    float(pipe_data["target_price"])
-                    if pipe_data.get("target_price") is not None
-                    else None
-                )
+
+    return _resolve(
+        args.criteria(),
+        label=args.query,
+        lookup=registry.lookup,
+        target_path=target.path,
+        dry_run=args.dry_run,
+        report_price=args.report_price,
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolveBatchArgs(ResolveOptions):
+    pass
+
+
+def _record_price_on(record: dict[str, Any]) -> PriceOnDate | None:
+    """``target_price`` with ``target_date``, else the first ``price_on`` entry"""
+    if record.get("target_price") is not None and record.get("target_date") is not None:
+        return PriceOnDate(
+            price=Price(float(record["target_price"])),
+            date=datetime.date.fromisoformat(str(record["target_date"])[:10]),
+        )
+    raw = record.get("price_on")
+    # pmdp >= 0.4.1 emits a list
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw and raw.get("price") is not None and raw.get("date"):
+        return PriceOnDate(
+            price=Price(float(raw["price"])),
+            date=datetime.date.fromisoformat(str(raw["date"])[:10]),
+        )
+    return None
+
+
+@app.command(
+    "resolve-batch",
+    description="Resolve every query record read from stdin, one result per record",
+    danger_level="mutating",
+    has_network_io=True,
+    stdin_input=True,
+    timeout=900,
+    exit_codes=["MISSING_PROVIDER"],
+    examples=[
+        (
+            "Resolve the securities of an IBKR statement",
+            "ibkr-converter securities statement.xml | instrument-reg resolve-batch",
+        ),
+        (
+            "Resolve records from a file, saving nothing",
+            "instrument-reg resolve-batch --input-file queries.jsonl --dry-run",
+        ),
+    ],
+)
+def resolve_batch(
+    args: ResolveBatchArgs, ctx: Ctx, registry: Registry, target: WriteTarget
+) -> Batch[InstrumentRecord]:
+    assert ctx.stdin_text is not None  # stdin_input=True
+    try:
+        records = _parse_pipe(ctx.stdin_text)
+    except ValueError as exc:
+        raise Exit.ARG_ERROR(
+            str(exc), suggestion="pipe JSON objects, one per query, or a JSON envelope"
+        ) from exc
+
+    items: list[Item[InstrumentRecord]] = []
+    for number, record in enumerate(records, start=1):
+        label = str(record.get("isin") or record.get("figi") or record.get("symbol") or number)
+        try:
+            criteria = _query(
+                isin=record.get("isin"),
+                symbol=record.get("symbol"),
+                figi=record.get("figi"),
+                currency=args.currency or record.get("currency"),
+                asset_class=args.asset_class or record.get("asset_class"),
+                price_on=_record_price_on(record),
             )
-            rec_date = (
-                date
-                if date is not None
-                else (
-                    str(pipe_data["target_date"])
-                    if pipe_data.get("target_date") is not None
-                    else None
-                )
+        except ValueError as exc:  # pydantic's ValidationError included
+            items.append(Item(number, error=ItemError("INVALID_RECORD", f"{label}: {exc}")))
+            continue
+        try:
+            value = _resolve(
+                criteria,
+                label=label,
+                lookup=registry.lookup,
+                target_path=target.path,
+                dry_run=args.dry_run,
+                report_price=args.report_price,
             )
-            raw_price_on_field = pipe_data.get("price_on") if rec_price is None else None
-            # Accept both a single dict and a list (pmdp >= 0.4.1 emits a list)
-            if isinstance(raw_price_on_field, list):
-                raw_price_on_field = raw_price_on_field[0] if raw_price_on_field else None
-            pipe_price_on: PriceOnDate | None = None
-            if (
-                raw_price_on_field
-                and raw_price_on_field.get("price") is not None
-                and raw_price_on_field.get("date")
-            ):
-                pipe_price_on = PriceOnDate(
-                    price=Price(float(raw_price_on_field["price"])),
-                    date=pd.to_datetime(str(raw_price_on_field["date"])).date(),
-                )
-            try:
-                _resolve_criteria(
-                    ctx=ctx,
-                    isin=pipe_data.get("isin"),
-                    symbol=pipe_data.get("symbol"),
-                    figi=figi or pipe_data.get("figi"),
-                    currency=currency or pipe_data.get("currency"),
-                    asset_class=asset_class or pipe_data.get("asset_class"),
-                    price=rec_price,
-                    date=rec_date,
-                    price_on=pipe_price_on,
-                    dry_run=no_save,
-                    report_price=report_price,
-                    reg=reg,
-                    target_path=target_path,
-                )
-            except ResolutionFailed as exc:
-                logger.error("%s", exc)
+        except CliExit as exc:
+            items.append(Item(number, error=exc))
+            continue
+        items.append(Item(number, value))
+    return Batch(items)

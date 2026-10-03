@@ -30,7 +30,6 @@ dependencies = [
     "pydantic-market-data>=0.4.0",
     "diskcache>=5.6.3",
     "platformdirs>=4.9.2",
-    "agentyper>=0.1.13",
     "treaty>=1.0.0rc5",
 ]
 readme = "README.md"

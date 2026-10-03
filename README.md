@@ -71,8 +71,9 @@ Queries can be ISINs, provider symbols, names, IBKR conids, or common FX pairs.
 
 ```bash
 instrument-reg resolve US0378331005
-# Output: Resolved: Apple Inc. -> AAPL (yahoo)
 ```
+
+A new discovery is saved to the write target (see Configuration); `--dry-run` resolves without saving.
 
 ### Automatic Currency Resolution
 The resolver can derive common FX provider symbols when they are not already in your registry:
@@ -87,6 +88,17 @@ With price verification (checks if price matches historical data):
 instrument-reg resolve US0378331005 --date 2024-01-01 --price 185.00
 ```
 
+### Resolve Many Queries
+`resolve-batch` reads query records from stdin (or `--input-file`): JSON objects, one per line or
+in an array, or another command's JSON envelope. Each record has `isin`, `symbol`, `figi`,
+`currency`, `asset_class`, and optionally `target_price` with `target_date` or `price_on`.
+The result has one entry per record, so failed records can be retried alone; any failed record
+exits `3`.
+
+```bash
+ibkr-converter securities statement.xml | instrument-reg resolve-batch
+```
+
 ### Add an Instrument
 Add a new instrument to your local registry.
 
@@ -98,7 +110,6 @@ instrument-reg add --registry-path ~/registry US0378331005 --fetch
 
 # Manually specify all details (instrument-type and asset-class are required without --fetch)
 INSTRUMENT_REGISTRY_PATH=~/registry instrument-reg add \
-  --name AAPL \
   --isin US0378331005 \
   --symbol AAPL \
   --instrument-type Stock \
@@ -119,6 +130,8 @@ Verify against live market data (checks if tickers are valid):
 instrument-reg lint --verify
 ```
 
+A registry error exits `80` (`LINT_FAILED`) with the full report still in `data`.
+
 ### Fetch Metadata
 Fetch details using local registries first, then provider lookup when needed.
 
@@ -127,11 +140,14 @@ instrument-reg fetch --isin US0378331005
 instrument-reg fetch --symbol AAPL --price
 ```
 
-`fetch` runs on [treaty](https://github.com/romamo/treaty): piped output is a JSON envelope (`{"ok", "data", "error", "warnings", "meta"}`) with the result under `data`, and a terminal gets plain text. Failures have their own exit codes: `2` bad arguments, `5` no match, `79` a live-data provider is not installed. `instrument-reg manifest` and `instrument-reg fetch --schema` describe the command for agents.
+### Output and Exit Codes
+
+The CLI runs on [treaty](https://github.com/romamo/treaty): piped output is a JSON envelope (`{"ok", "data", "error", "warnings", "meta"}`) with the result under `data`, and a terminal gets plain text. `add`, `resolve`, and `resolve-batch` report an `effect` (`created`, `updated`, `noop`, or `would_*` on a dry run). Failures have their own exit codes: `2` bad arguments, `3` some batch records failed, `4` no write target configured, `5` no match, `6` symbol collision, `79` a live-data provider is not installed, `80` lint found registry errors. `instrument-reg manifest` and `instrument-reg <command> --schema` describe the commands for agents, and `-v`/`-vv` go after the command.
 
 ### Command Summary
 
 - `resolve`: resolve a query from local registries first, then external providers
+- `resolve-batch`: resolve every query record read from stdin
 - `add`: add or update an instrument in an explicit user registry path
 - `fetch`: inspect provider details using local registry precedence first
 - `lint`: validate registry files and optionally verify live provider data

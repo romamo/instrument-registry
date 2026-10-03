@@ -1,21 +1,22 @@
-from __future__ import annotations
-
 import logging
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
-import agentyper as typer
 from pydantic_market_data.models import Price, PriceVerificationError
+from treaty import Ctx, Exit, Flag, Out, ParseError
 
+from ..interfaces import ProviderName
+from ..models import Instrument
 from . import common
+from .treaty_app import RegistryScope, app, raise_missing_provider, require_live_providers
 
 logger = logging.getLogger(__name__)
+COMMAND_NAME = "instrument-reg lint --verify"
 
 
-def _provider_pairs(instrument: Any) -> list[tuple[Any, str]]:
-    from ..interfaces import ProviderName
-
-    pairs: list[tuple[Any, str]] = []
+def _provider_pairs(instrument: Instrument) -> list[tuple[ProviderName, str]]:
+    pairs: list[tuple[ProviderName, str]] = []
     if not instrument.tickers:
         return pairs
     if instrument.tickers.yahoo:
@@ -25,56 +26,162 @@ def _provider_pairs(instrument: Any) -> list[tuple[Any, str]]:
     return pairs
 
 
-def _primary_provider_pair(instrument: Any) -> tuple[Any | None, str | None]:
-    pairs = _provider_pairs(instrument)
-    if pairs:
-        return pairs[0]
-    return None, None
+@dataclass(frozen=True, slots=True)
+class LintArgs(RegistryScope):
+    path: Path | None = Flag(
+        default=None, description="Lint only this registry file or directory, without bundled data"
+    )
+    verify: bool = Flag(default=False, description="Also check each instrument against providers")
+    only: str | None = Flag(default=None, description="Verify only the instrument with this symbol")
+
+    def __post_init__(self) -> None:
+        if self.only is not None and not self.verify:
+            raise ParseError("--only selects what --verify checks; pass --verify too")
 
 
-def command(
-    ctx: typer.Context,
-    registry_path: str | None = common.REGISTRY_PATH_OPTION,
-    no_bundled: bool = common.NO_BUNDLED_OPTION,
-    path: str | None = typer.Option(
-        None,
-        "--path",
-        help="Lint only this registry file or directory",
-    ),  # noqa: B008
-    verify: bool = False,
-    only: str | None = typer.Option(
-        None,
-        "--only",
-        help="Verify only the named instrument",
-    ),  # noqa: B008
-) -> None:
-    """Validate registry files and optionally verify live provider data."""
+class VerifyStatus(StrEnum):
+    OK = "ok"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True, slots=True)
+class Verification:
+    """One instrument checked against its primary provider"""
+
+    symbol: str
+    provider: ProviderName | None
+    ticker: str | None
+    status: VerifyStatus
+    details: list[str] = Out(ordered=True, external=True)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LintReport:
+    target: str
+    instrument_count: int
+    checked: list[str] = Out(ordered=True)
+    error_count: int
+    warning_count: int
+    errors: list[str] = Out(ordered=True)
+    warnings: list[str] = Out(ordered=True)
+    verified: bool
+    verifications: list[Verification] = Out(ordered=True)
+
+
+def _verify(instrument: Instrument, warnings: list[str]) -> Verification:
+    """Compare one instrument with live provider data, appending what differs to warnings"""
     from ..finder import fetch_metadata, verify_ticker
 
-    common.configure_registry_scope(
-        ctx=ctx,
-        registry_path=registry_path,
-        no_bundled=no_bundled,
-    )
+    pairs = _provider_pairs(instrument)
+    if not pairs:
+        return Verification(
+            instrument.symbol, None, None, VerifyStatus.SKIPPED, ["No compatible ticker"]
+        )
+    provider, ticker = pairs[0]
+    details: list[str] = []
+    logger.debug("Fetching live metadata for %s via %s...", ticker, provider)
+    try:
+        ext_data = fetch_metadata(ticker, provider=provider)
+    except ImportError:
+        raise_missing_provider(provider, COMMAND_NAME)
 
-    fmt = common.current_format()
-    target_desc = "external path"
-    if path:
-        path_obj = Path(path).expanduser()
-        reg = common.get_registry(include_bundled=False, extra_paths=[path_obj])
-        target_desc = str(path_obj)
+    if not ext_data:
+        warnings.append(f"{instrument.symbol}: No external metadata found")
+        details.append(f"No external data found for {ticker}")
+        return Verification(instrument.symbol, provider, ticker, VerifyStatus.FAILED, details)
+
+    success = True
+    ext_isin = ext_data.isin
+    if instrument.isin and ext_isin:
+        if str(instrument.isin).upper() != ext_isin.upper():
+            details.append(f"ISIN: {instrument.isin} [MISMATCH: {ext_isin}]")
+            warnings.append(
+                f"{instrument.symbol}: ISIN mismatch (Registry: {instrument.isin}, "
+                f"Provider: {ext_isin})"
+            )
+            success = False
+        else:
+            details.append(f"ISIN: {instrument.isin} [OK]")
     else:
-        reg = common.registry()
+        details.append(f"ISIN: {instrument.isin or 'N/A'} (Provider: {ext_isin or 'N/A'})")
+
+    ext_symbol = ext_data.symbol
+    if ext_symbol:
+        if ticker.upper() != str(ext_symbol).upper():
+            details.append(f"Ticker: {ticker} [MISMATCH: {ext_symbol}]")
+            warnings.append(
+                f"{instrument.symbol}: Ticker mismatch (Registry: {ticker}, Provider: {ext_symbol})"
+            )
+            success = False
+        else:
+            details.append(f"Ticker: {ticker} [OK]")
+    else:
+        details.append(f"Ticker: {ticker} (Provider: N/A)")
+
+    ext_curr = str(ext_data.currency) if ext_data.currency else None
+    if ext_curr and ext_curr.upper() == str(instrument.currency).upper():
+        details.append(f"Currency: {instrument.currency} [OK]")
+    else:
+        details.append(f"Currency: {instrument.currency} [MISMATCH: {ext_curr}]")
+        warnings.append(f"{instrument.symbol}: Currency mismatch")
+        success = False
+
+    if instrument.figi:
+        details.append(f"FIGI: {instrument.figi}")
+
+    if not instrument.validation_points:
+        details.append("Historical Verification: [SKIPPED: No validation points]")
+    for point in instrument.validation_points or []:
+        verified_count = 0
+        for provider_name, ticker_value in pairs:
+            price = Price(point.price) if isinstance(point.price, (float, int)) else point.price
+            label = f"{point.date} (Target: {point.price}) {provider_name.upper()}"
+            try:
+                if verify_ticker(ticker_value, point.date, price, provider=provider_name):
+                    details.append(f"{label}: [OK: Range Match]")
+                    verified_count += 1
+                else:
+                    details.append(f"{label}: [FAILED]")
+            except ImportError:
+                raise_missing_provider(provider_name, COMMAND_NAME)
+            except PriceVerificationError as exc:
+                details.append(f"{label}: [FAILED: {exc}]")
+        if verified_count == 0:
+            success = False
+            warnings.append(f"{instrument.symbol}: Price verification failed on {point.date}")
+
+    status = VerifyStatus.OK if success else VerifyStatus.FAILED
+    return Verification(instrument.symbol, provider, ticker, status, details)
+
+
+@app.command(
+    "lint",
+    description="Validate registry files and optionally verify live provider data",
+    danger_level="safe",
+    has_network_io=True,
+    timeout=900,
+    exit_codes=["NOT_FOUND", "MISSING_PROVIDER", "LINT_FAILED"],
+    examples=[
+        ("Lint the bundled and user registries", "instrument-reg lint"),
+        ("Lint one file", "instrument-reg lint --path ~/registry/manual.yaml"),
+        ("Verify one instrument against providers", "instrument-reg lint --verify --only AAPL"),
+    ],
+)
+def lint(args: LintArgs, ctx: Ctx) -> LintReport:
+    if args.path is not None:
+        reg = common.get_registry(include_bundled=False, extra_paths=[args.path.expanduser()])
+        target_desc = str(args.path)
+    else:
+        reg = common.open_registry(args.registry_paths(), bundled=not args.no_bundled)
         target_desc = "registry"
 
     instruments = reg.get_all()
-    errors = reg.load_errors.copy()
+    errors = list(reg.load_errors)
     warnings: list[str] = []
-    checked_names: list[str] = []
 
     seen_isinc: dict[tuple[str, str], str] = {}
     for instrument in instruments:
-        checked_names.append(instrument.symbol)
         instrument_ok = True
         if instrument.isin:
             key = (str(instrument.isin).upper(), str(instrument.currency).upper())
@@ -85,182 +192,39 @@ def command(
                 )
                 instrument_ok = False
             seen_isinc[key] = instrument.symbol
-        if common.STATE.debug:
-            status_lbl = "OK" if instrument_ok else "FAILED"
-            if fmt == "table":
-                print(f"{instrument.symbol}: {status_lbl}")
-            elif fmt == "json":
-                common.emit_json_event(
-                    {
-                        "event": "instrument_checked",
-                        "symbol": instrument.symbol,
-                        "status": status_lbl,
-                    }
-                )
+        status = "OK" if instrument_ok else "FAILED"
+        ctx.debug("instrument checked", symbol=instrument.symbol, status=status)
 
-    if verify:
+    verifications: list[Verification] = []
+    if args.verify:
         targets = instruments
-        if only:
-            targets = [instrument for instrument in targets if instrument.symbol == only]
+        if args.only is not None:
+            targets = [instrument for instrument in targets if instrument.symbol == args.only]
             if not targets:
-                common.exit_with_error(f"Instrument '{only}' not found.")
+                raise Exit.NOT_FOUND(
+                    f"Instrument '{args.only}' not found.",
+                    context={"only": args.only},
+                    suggestion="pass a symbol listed in data.checked of a plain lint run",
+                )
+        primary = next((pairs[0][0] for t in targets if (pairs := _provider_pairs(t))), None)
+        require_live_providers(primary, COMMAND_NAME)
+        for done, instrument in enumerate(targets, start=1):
+            ctx.progress(f"verifying {instrument.symbol}", done=done, total=len(targets))
+            verifications.append(_verify(instrument, warnings))
 
-        required_provider = next(
-            (provider for provider, ticker in map(_primary_provider_pair, targets) if ticker),
-            None,
-        )
-        common.require_live_providers(
-            "instrument-reg lint --verify",
-            provider=required_provider,
-        )
-
-        print(f"\n=== Granular Data Audit (Live) - {len(targets)} items ===")
-        for instrument in targets:
-            provider, ticker = _primary_provider_pair(instrument)
-
-            if ticker and provider is not None:
-                audit_log: list[str] = []
-                success = True
-                logger.debug("Fetching live metadata for %s via %s...", ticker, provider)
-                try:
-                    ext_data = fetch_metadata(ticker, provider=provider)
-                except ImportError:
-                    common.exit_missing_provider(provider=provider)
-
-                if not ext_data:
-                    audit_log.append(f"  [!] FAILED: No external data found for {ticker}")
-                    warnings.append(f"{instrument.symbol}: No external metadata found")
-                    success = False
-                else:
-                    ext_isin = ext_data.isin if hasattr(ext_data, "isin") else None
-                    if instrument.isin and ext_isin:
-                        if str(instrument.isin).upper() != ext_isin.upper():
-                            audit_log.append(
-                                f"  ISIN:     {instrument.isin} [MISMATCH: {ext_isin}]"
-                            )
-                            warnings.append(
-                                f"{instrument.symbol}: ISIN mismatch (Registry: {instrument.isin}, "
-                                f"Provider: {ext_isin})"
-                            )
-                            success = False
-                        else:
-                            audit_log.append(f"  ISIN:     {instrument.isin} [OK]")
-                    else:
-                        audit_log.append(
-                            f"  ISIN:     {instrument.isin or 'N/A'} "
-                            f"(Provider: {ext_isin or 'N/A'})"
-                        )
-
-                    ext_symbol = ext_data.symbol
-                    if ext_symbol:
-                        if ticker.upper() != str(ext_symbol).upper():
-                            audit_log.append(f"  Ticker:   {ticker} [MISMATCH: {ext_symbol}]")
-                            warnings.append(
-                                f"{instrument.symbol}: Ticker mismatch (Registry: {ticker}, "
-                                f"Provider: {ext_symbol})"
-                            )
-                            success = False
-                        else:
-                            audit_log.append(f"  Ticker:   {ticker} [OK]")
-                    else:
-                        audit_log.append(f"  Ticker:   {ticker} (Provider: {ext_symbol or 'N/A'})")
-
-                    ext_curr = (
-                        str(ext_data.currency.root)
-                        if (ext_data.currency and hasattr(ext_data.currency, "root"))
-                        else str(ext_data.currency)
-                        if ext_data.currency
-                        else None
-                    )
-                    status_curr = (
-                        "[OK]"
-                        if (
-                            ext_curr
-                            and instrument.currency
-                            and ext_curr.upper() == str(instrument.currency).upper()
-                        )
-                        else f"[MISMATCH: {ext_curr}]"
-                    )
-                    audit_log.append(f"  Currency: {instrument.currency} {status_curr}")
-                    if "MISMATCH" in status_curr:
-                        warnings.append(f"{instrument.symbol}: Currency mismatch")
-                        success = False
-
-                    if instrument.figi:
-                        audit_log.append(f"  FIGI:     {instrument.figi}")
-
-                    if instrument.validation_points:
-                        audit_log.append("  Historical Verification:")
-                        for validation_point in instrument.validation_points:
-                            verified_count = 0
-                            vp_log = [
-                                f"    - {validation_point.date} (Target: {validation_point.price}):"
-                            ]
-                            providers_to_check = _provider_pairs(instrument)
-
-                            if not providers_to_check:
-                                vp_log.append("      [SKIPPED: No ticker found]")
-                                audit_log.extend(vp_log)
-                                continue
-
-                            for provider_name, ticker_value in providers_to_check:
-                                v_price = (
-                                    Price(validation_point.price)
-                                    if isinstance(validation_point.price, (float, int))
-                                    else validation_point.price
-                                )
-                                try:
-                                    if verify_ticker(
-                                        ticker_value,
-                                        validation_point.date,
-                                        v_price,
-                                        provider=provider_name,
-                                    ):
-                                        vp_log.append(
-                                            f"      * {provider_name.upper()}: [OK: Range Match]"
-                                        )
-                                        verified_count += 1
-                                    else:
-                                        vp_log.append(f"      * {provider_name.upper()}: [FAILED]")
-                                except ImportError:
-                                    common.exit_missing_provider(provider=provider_name)
-                                except PriceVerificationError as exc:
-                                    vp_log.append(
-                                        f"      * {provider_name.upper()}: [FAILED: {exc}]"
-                                    )
-
-                            if verified_count == 0:
-                                success = False
-                                audit_log.extend(vp_log)
-                                warnings.append(
-                                    f"{instrument.symbol}: Price verification failed on "
-                                    f"{validation_point.date}"
-                                )
-                            else:
-                                audit_log.extend(vp_log)
-                    else:
-                        audit_log.append(
-                            "  Historical Verification: [SKIPPED: No validation points]"
-                        )
-
-                status_lbl = "OK" if success else "FAILED"
-                print(f"{instrument.symbol}({provider.value} {ticker}): {status_lbl}")
-                if not success or common.STATE.debug:
-                    for line in audit_log:
-                        print(line)
-            else:
-                print(f"{instrument.symbol}: [SKIPPED: No compatible ticker]")
-
-    lint_report = {
-        "target": target_desc,
-        "instrument_count": len(instruments),
-        "checked": checked_names,
-        "error_count": len(errors),
-        "warning_count": len(warnings),
-        "errors": errors,
-        "warnings": warnings,
-        "verified": verify,
-    }
-    typer.output(lint_report, title="Lint Report")
+    report = LintReport(
+        target=target_desc,
+        instrument_count=len(instruments),
+        checked=[instrument.symbol for instrument in instruments],
+        error_count=len(errors),
+        warning_count=len(warnings),
+        errors=errors,
+        warnings=warnings,
+        verified=args.verify,
+        verifications=verifications,
+    )
     if errors:
-        raise SystemExit(1)
+        raise Exit.LINT_FAILED(
+            f"{len(errors)} registry error(s) found.", context={"target": target_desc}, data=report
+        )
+    return report

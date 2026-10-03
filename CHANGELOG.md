@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Every command runs on treaty**, so all of them answer with a JSON envelope when piped (result under `data`), take `-v`/`-vv` after the command, and accept a repeated `--registry-path`
+- **`resolve`** (breaking for callers that parse its output or pipe into it):
+  - Takes exactly one QUERY; piped records go to the new `resolve-batch`
+  - The result is always an instrument record with an `effect` (`created` for a saved discovery, `noop` for a registry hit, `would_*` under `--dry-run`); a provider-only match, such as a currency, has the same shape with empty registry fields
+  - `--no-save` is now `--dry-run`, and `--provider` (never implemented) is gone
+  - `--date` and `--price` must be passed together; a malformed ISIN or date exits `2` before any lookup
+  - No match exits `5` (`NOT_FOUND`) instead of `1`, and missing live-data providers exit `79` (`MISSING_PROVIDER`)
+  - `--report-price` puts the price on every result, not only on provider-only matches
+- **`add`**:
+  - Returns the saved record with `effect` `created` or `updated`; `--dry-run` returns `would_create` or `would_update` instead of printing YAML
+  - Without `--fetch`, `--currency`, `--instrument-type`, and `--asset-class` are required up front (exit `2`); a QUERY, `--isin`, or `--symbol` is always required
+  - No write target exits `4` (`PRECONDITION`), a symbol already registered under another asset class exits `6` (`CONFLICT`), and `--fetch` with no provider match adds a `METADATA_NOT_FOUND` warning
+  - `--figi` (never stored) is gone
+- **`lint`**:
+  - Registry errors exit `80` (`LINT_FAILED`) instead of `1`, with the full report still in `data`
+  - `--verify` results are in `data.verifications` (status and check lines per instrument) instead of printed text; `-vv` per-instrument lines go to stderr
+  - `--only` requires `--verify`, and an unknown `--only` symbol exits `5` (`NOT_FOUND`)
+- `registry.add_instrument` is split into `build_instrument` and `save_instrument`, which returns `SaveEffect.CREATED` or `UPDATED`; `_save_instrument_to_file` is renamed `save_instrument` and no longer prints on a dry run. A symbol collision raises `SymbolCollision`, a `ValueError`
+
+### Added
+- `resolve-batch` reads query records from stdin or `--input-file` (JSON objects, arrays, or upstream envelopes) and returns one result per record; any failed record exits `3` (`PARTIAL_FAILURE`), so only those need a retry
+
+### Dependencies
+- Removed `agentyper`
+
 ## [0.3.0] - 2026-09-30
 
 ### Changed

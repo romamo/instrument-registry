@@ -1,5 +1,6 @@
 import logging
 import os
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,17 @@ from .models import AssetClass, Instrument, InstrumentFile, InstrumentType, _map
 from .resources import get_instrument_files
 
 logger = logging.getLogger(__name__)
+
+
+class SymbolCollision(ValueError):
+    """The symbol is already registered under another asset class"""
+
+
+class SaveEffect(StrEnum):
+    """What saving an instrument does to its registry file"""
+
+    CREATED = "created"
+    UPDATED = "updated"
 
 
 class StrictSafeLoader(yaml.SafeLoader):
@@ -214,6 +226,35 @@ def add_instrument(
     """
     Adds a new instrument to the registry.
 
+    Builds the record with ``build_instrument`` and saves it with ``save_instrument``.
+    """
+    instrument = build_instrument(
+        criteria=criteria,
+        metadata=metadata,
+        instrument_type=instrument_type,
+        asset_class=asset_class,
+        symbol=symbol,
+        registry=registry,
+        country=country,
+        ibkr=ibkr,
+    )
+    save_instrument(instrument, target_path, dry_run=dry_run)
+    return instrument
+
+
+def build_instrument(
+    criteria: SecurityQuery,
+    metadata: SearchResult | None,  # None if not found online
+    instrument_type: InstrumentType | None = None,
+    asset_class: AssetClass | None = None,
+    symbol: str | None = None,
+    registry: InstrumentRegistry | None = None,
+    country: str | None = None,
+    ibkr: int | None = None,
+) -> Instrument:
+    """
+    Builds the instrument record ``add_instrument`` saves, without touching any file.
+
     Uses SecurityQuery.symbol (the raw token or security symbol).
     Extracts base ticker (before ':') for Beancount symbol.
     Stores provider-specific tickers only if found online.
@@ -260,7 +301,7 @@ def add_instrument(
             # If both are same symbol, same asset class, same currency, we allow it (update).
             # If it's a symbol collision with a different asset class, we warn/error.
             if match.asset_class != asset_class:
-                raise ValueError(
+                raise SymbolCollision(
                     f"Symbol collision: '{clean_symbol}' already registered as "
                     f"{match.asset_class}. Refusing to add as {asset_class}."
                 )
@@ -299,7 +340,7 @@ def add_instrument(
         else (metadata.currency if metadata and metadata.currency else Currency("USD"))
     )
 
-    instrument = Instrument(
+    return Instrument(
         symbol=clean_symbol,
         name=metadata.name if metadata else None,
         isin=criteria.isin,
@@ -317,33 +358,20 @@ def add_instrument(
         metadata=metadata.metadata if metadata else None,
     )
 
-    # 5. Save to file
-    _save_instrument_to_file(instrument, target_path, dry_run=dry_run)
 
-    return instrument
-
-
-def _save_instrument_to_file(instrument: Instrument, target_path: Path, dry_run: bool = False):
+def save_instrument(instrument: Instrument, target_path: Path, dry_run: bool = False) -> SaveEffect:
     """
     Saves an instrument to the specified YAML file.
     Handles duplicate checks (ISIN/Name) by reading existing file content first.
+    A dry run reports the same effect and writes nothing.
     """
-    if dry_run:
-        logger.info(f"[DRY RUN] Would save to: {target_path}")
-        print(
-            yaml.dump(
-                {"instruments": [instrument.model_dump(mode="json", exclude_none=True)]},
-                sort_keys=False,
-            )
-        )
-        return
-
     data = None
 
     if target_path.suffix == "" or target_path.is_dir():
-        target_path.mkdir(parents=True, exist_ok=True)
+        if not dry_run:
+            target_path.mkdir(parents=True, exist_ok=True)
         target_path = target_path / "manual.yaml"
-    else:
+    elif not dry_run:
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Load existing to check duplicates
@@ -377,17 +405,25 @@ def _save_instrument_to_file(instrument: Instrument, target_path: Path, dry_run:
                 match = True
 
             if match:
+                if dry_run:
+                    logger.info(f"[DRY RUN] Would update {instrument.symbol} in {target_path}")
+                    return SaveEffect.UPDATED
                 # Update existing record with new data
                 updated_data = instrument.model_dump(mode="json", exclude_none=True)
                 existing_instruments[i] = updated_data
                 _save_to_yaml(data, existing_instruments, target_path)
-                return
+                return SaveEffect.UPDATED
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would add {instrument.symbol} to {target_path}")
+        return SaveEffect.CREATED
 
     # Append new if no match found
     existing_instruments.append(instrument.model_dump(mode="json", exclude_none=True))
     _save_to_yaml(data, existing_instruments, target_path)
 
     logger.info(f"Auto-added {instrument.symbol} to {target_path}")
+    return SaveEffect.CREATED
 
 
 def _save_to_yaml(data: dict | None, instruments: list[dict], target_path: Path) -> None:
