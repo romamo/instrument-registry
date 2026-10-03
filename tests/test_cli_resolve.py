@@ -9,7 +9,7 @@ from instrument_registry.cli.treaty_app import app
 from instrument_registry.interfaces import ProviderName, SearchResult
 from instrument_registry.models import AssetClass, Instrument, InstrumentType
 
-ENV = {"INSTRUMENT_REG_AUDIT_LOG": "off"}
+ENV = {"INSTRUMENT_REG_AUDIT_LOG": "0"}
 APPLE = SearchResult(
     provider=ProviderName.YAHOO, symbol="AAPL", name="Apple Inc.", currency=Currency("USD")
 )

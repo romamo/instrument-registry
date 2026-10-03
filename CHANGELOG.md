@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 - Removed `agentyper`
+- `treaty>=1.0.0rc30,<1.1` (was `>=1.0.0rc5`). Its audit log setting `INSTRUMENT_REG_AUDIT_LOG` takes `0`, `1`, or an absolute path; `off` is refused
 
 ## [0.3.0] - 2026-09-30
 

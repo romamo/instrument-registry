@@ -6,7 +6,7 @@ from pydantic_market_data.models import Currency
 from instrument_registry.cli.treaty_app import app
 from instrument_registry.interfaces import ProviderName, SearchResult
 
-ENV = {"INSTRUMENT_REG_AUDIT_LOG": "off"}
+ENV = {"INSTRUMENT_REG_AUDIT_LOG": "0"}
 STOCK = {"instrument_type": "Stock", "asset_class": "Stock", "currency": "USD"}
 
 

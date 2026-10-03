@@ -286,7 +286,7 @@ def _record_price_on(record: dict[str, Any]) -> PriceOnDate | None:
     has_network_io=True,
     stdin_input=True,
     timeout=900,
-    exit_codes=["MISSING_PROVIDER"],
+    exit_codes=["NOT_FOUND", "MISSING_PROVIDER"],
     examples=[
         (
             "Resolve the securities of an IBKR statement",

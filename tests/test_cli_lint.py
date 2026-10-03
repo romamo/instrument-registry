@@ -14,7 +14,7 @@ from instrument_registry.models import (
 )
 from instrument_registry.registry import save_instrument
 
-ENV = {"INSTRUMENT_REG_AUDIT_LOG": "off"}
+ENV = {"INSTRUMENT_REG_AUDIT_LOG": "0"}
 AAPL = Instrument(
     symbol="AAPL",
     isin="US0378331005",
