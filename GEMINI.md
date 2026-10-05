@@ -11,7 +11,7 @@ A Python-based registry for canonical financial instrument records. This project
   - **Data Storage**: YAML files (Strict loading, no duplicate keys).
   - **Market Data**: Integrates with `py-yfinance` and `py-ftmarkets`.
   - **Caching**: [diskcache](https://grantjenks.com/docs/diskcache/) for metadata and price persistence.
-  - **CLI Framework**: [Agentyper](https://pypi.org/project/agentyper/) with command modules under `src/instrument_registry/cli/`.
+  - **CLI Framework**: [treaty](https://github.com/romamo/treaty) with command modules under `src/instrument_registry/cli/`.
 
 ## Architecture & Concepts
 
