@@ -6,10 +6,10 @@ A Python-based registry for canonical financial instrument records. This project
 
 - **Core Purpose**: Resolve financial symbols and ISINs to a canonical registry, providing metadata (currency, asset class) and price verification.
 - **Main Technologies**:
-  - **Language**: Python 3.10+
+  - **Language**: Python 3.14+
   - **Data Modeling**: [Pydantic v2](https://docs.pydantic.dev/latest/) for robust validation and settings.
   - **Data Storage**: YAML files (Strict loading, no duplicate keys).
-  - **Market Data**: Integrates with `py-yfinance` and `py-ftmarkets`.
+  - **Market Data**: Integrates with `py-yfinance`, `py-ftmarkets`, and `py-openfigi2` (ISIN/FIGI resolution).
   - **Caching**: [diskcache](https://grantjenks.com/docs/diskcache/) for metadata and price persistence.
   - **CLI Framework**: [treaty](https://github.com/romamo/treaty) with command modules under `src/instrument_registry/cli/`.
 
