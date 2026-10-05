@@ -8,19 +8,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agentyper"
-version = "0.1.13"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/3e/6d421d5d8ff9adc84aa79d17345081e505f180acc7ff18209b421a7242ef/agentyper-0.1.13.tar.gz", hash = "sha256:a6dcaa6f332b87b714b9ef26c3840b15f82ff186978250b2117cc842f2e534c9", size = 43404, upload-time = "2026-05-10T08:36:47.121Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/03/b521d1f7f9beec3019fdcc3f9ae0666997c0012429e39d3b5ed3079a1570/agentyper-0.1.13-py3-none-any.whl", hash = "sha256:f1bc83014921c79ded046815df9a83933723f5e187f6ab311cb7345bef6271d0", size = 40079, upload-time = "2026-05-10T08:36:48.724Z" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -305,7 +292,7 @@ requires-dist = [
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "platformdirs", specifier = ">=4.9.2" },
     { name = "py-ftmarkets", marker = "extra == 'providers'", specifier = ">=0.5.0" },
-    { name = "py-openfigi2", marker = "extra == 'providers'", specifier = ">=0.1.2" },
+    { name = "py-openfigi2", marker = "extra == 'providers'", specifier = ">=0.2.1" },
     { name = "py-yfinance", marker = "extra == 'providers'", specifier = ">=0.4.3" },
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "pydantic-market-data", specifier = ">=0.4.0" },
@@ -605,16 +592,16 @@ wheels = [
 
 [[package]]
 name = "py-openfigi2"
-version = "0.1.2"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "agentyper" },
     { name = "pydantic-market-data" },
     { name = "requests" },
+    { name = "treaty" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/13/574b1d833074e0fa36977443903b4b3a933907ba08a0a77078551703700f/py_openfigi2-0.1.2.tar.gz", hash = "sha256:1c9b0bbb3157a5ec9b0aecbe3d57a9ff60d4c6596f9b87eb984ab30cf9a1afa4", size = 7297, upload-time = "2026-05-07T08:03:19.344Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/be/9598ed13492b668f5c7c78c7afc761bf33973091ffb83f8285441914fd56/py_openfigi2-0.2.1.tar.gz", hash = "sha256:90396a7b3e9b7201f27b52df3cc2bee21f8908121981d3cbd4c94294f5b98534", size = 12653, upload-time = "2026-10-03T16:40:58.058Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/f1/9e353b70e2c2fcc6fe5f95a4d83e10b237fe71204320688f50d0323f53bf/py_openfigi2-0.1.2-py3-none-any.whl", hash = "sha256:84e928dd32433040a1fddab009f2596155b7502d1349d7adfd6c7a43abefb4ee", size = 9021, upload-time = "2026-05-07T08:03:18.2Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/3c/7afdadf7c3a399f162ba93a2c104eebd38d431931373f8a6cc5691edae51/py_openfigi2-0.2.1-py3-none-any.whl", hash = "sha256:eea31b30b643c5d2249b035186cd7720fbc4bacfab21e26747e2c0f42c140b96", size = 11233, upload-time = "2026-10-03T16:40:57.013Z" },
 ]
 
 [[package]]
