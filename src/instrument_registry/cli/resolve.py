@@ -290,7 +290,7 @@ def _record_price_on(record: dict[str, Any]) -> PriceOnDate | None:
     examples=[
         (
             "Resolve the securities of an IBKR statement",
-            "ibkr-converter securities statement.xml | instrument-reg resolve-batch",
+            "your-converter securities statement.xml | instrument-reg resolve-batch",
         ),
         (
             "Resolve records from a file, saving nothing",

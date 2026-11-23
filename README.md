@@ -96,7 +96,7 @@ The result has one entry per record, so failed records can be retried alone; any
 exits `3`.
 
 ```bash
-ibkr-converter securities statement.xml | instrument-reg resolve-batch
+your-converter securities statement.xml | instrument-reg resolve-batch
 ```
 
 ### Add an Instrument
